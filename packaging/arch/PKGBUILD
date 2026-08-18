@@ -1,0 +1,41 @@
+# Maintainer: UtterMux contributors
+pkgname=uttermux
+pkgver=0.3.0
+pkgrel=1
+pkgdesc='Universal local and online TTS broker for Speech Dispatcher'
+arch=(x86_64 aarch64)
+url='https://github.com/uttermux/uttermux'
+license=(GPL-3.0-or-later)
+depends=('speech-dispatcher>=0.12' libspeechd rubberband python python-numpy python-aiohttp python-certifi curl ffmpeg libpulse onnxruntime-cpu)
+optdepends=('wl-clipboard: read Wayland selections' 'xclip: read X11 selections' 'xsel: alternate X11 selection reader')
+makedepends=(cmake ninja gcc git)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+        "sherpa-onnx-1.13.6.tar.gz::https://github.com/k2-fsa/sherpa-onnx/archive/refs/tags/v1.13.6.tar.gz"
+        "edge_tts-7.2.8-py3-none-any.whl::https://files.pythonhosted.org/packages/py3/e/edge-tts/edge_tts-7.2.8-py3-none-any.whl"
+        "py3langid-0.3.0-py3-none-any.whl::https://files.pythonhosted.org/packages/9d/1c/8212ea872d236af0aea37043fb6feeaa9a43449183782b19d342f8ddd343/py3langid-0.3.0-py3-none-any.whl")
+sha256sums=('SKIP' 'SKIP' '361fe48ce7ef613adbe30f664e3765dd71029c6cb57427279eff8ad6df2eb211'
+            '38f022eec31cf9a2bf6f142acb2a9b350fd7d0d5ae7762b1392c6d3567401fd3') # Release automation replaces project/sherpa values.
+
+build() {
+  cmake -S "sherpa-onnx-1.13.6" -B sherpa-build -G Ninja \
+    -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_SHARED_LIBS=ON \
+    -DSHERPA_ONNX_ENABLE_TTS=ON -DSHERPA_ONNX_ENABLE_C_API=ON \
+    -DSHERPA_ONNX_ENABLE_BINARY=OFF -DSHERPA_ONNX_ENABLE_PYTHON=OFF \
+    -DSHERPA_ONNX_ENABLE_TESTS=OFF -DSHERPA_ONNX_ENABLE_CHECK=OFF \
+    -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF \
+    -DSHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION=OFF \
+    -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=ON
+  ninja -C sherpa-build
+
+  cmake -S "$pkgname-$pkgver" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
+  ninja -C build
+}
+
+package() {
+  DESTDIR="$pkgdir" ninja -C sherpa-build install
+  DESTDIR="$pkgdir" ninja -C build install
+  install -d "$pkgdir/usr/lib/uttermux/vendor"
+  bsdtar -xf edge_tts-7.2.8-py3-none-any.whl -C "$pkgdir/usr/lib/uttermux/vendor"
+  bsdtar -xf py3langid-0.3.0-py3-none-any.whl -C "$pkgdir/usr/lib/uttermux/vendor"
+}

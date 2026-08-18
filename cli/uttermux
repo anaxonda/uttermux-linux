@@ -1,0 +1,490 @@
+#!/usr/bin/env python3
+"""Configure and inspect UtterMux without loading any TTS provider itself."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+import urllib.error
+import urllib.parse
+import urllib.request
+
+MAGIC, VERSION = 0x58544D55, 1
+HEADER = struct.Struct("<IHHQI")
+LIST_VOICES, VOICE, DONE, ERROR, HEALTH = 2, 3, 7, 9, 10
+
+
+def config_dir() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "uttermux"
+
+
+def config_path() -> Path:
+    return config_dir() / "config.toml"
+
+
+def socket_path() -> Path:
+    return Path(os.environ.get("UTTERMUX_SOCKET", Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "uttermux.sock"))
+
+
+def atomic_write(path: Path, data: str, mode: int = 0o600) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(data); stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        try: os.unlink(temporary)
+        except FileNotFoundError: pass
+
+
+def connect() -> socket.socket:
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    client.connect(str(socket_path()))
+    return client
+
+
+def transact(kind: int, payload: bytes = b""):
+    client = connect(); request = 1
+    client.sendall(HEADER.pack(MAGIC, VERSION, kind, request, len(payload)) + payload)
+    try:
+        while True:
+            raw = client.recv(65536)
+            magic, version, response_kind, rid, size = HEADER.unpack_from(raw)
+            if magic != MAGIC or version != VERSION or rid != request or size != len(raw) - HEADER.size:
+                raise RuntimeError("invalid response from uttermuxd")
+            payload = raw[HEADER.size:]
+            if response_kind == ERROR: raise RuntimeError(payload.decode(errors="replace"))
+            if response_kind == DONE: return
+            yield response_kind, payload
+    finally: client.close()
+
+
+def voices():
+    for kind, payload in transact(LIST_VOICES, b"management\0"):
+        if kind == VOICE:
+            values = [part.decode() for part in payload.rstrip(b"\0").split(b"\0")]
+            while len(values) < 6: values.append("")
+            yield values[:6]
+
+
+def read_config() -> dict:
+    if not config_path().exists(): return {}
+    with config_path().open("rb") as stream: return tomllib.load(stream)
+
+
+def quote(value) -> str:
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def render_config(doc: dict) -> str:
+    lines = ["schema_version = 2", f'max_loaded_models = {int(doc.get("max_loaded_models", 2))}',
+             f'audio_cache_mb = {int(doc.get("audio_cache_mb", 64))}']
+    for key in ("default_voice", "fallback_voice"):
+        if doc.get(key): lines.append(f'{key} = {quote(doc[key])}')
+    providers = doc.get("providers", {})
+    edge = providers.get("edge", {})
+    lines += ["", "[providers.edge]", f'enabled = {str(bool(edge.get("enabled", False))).lower()}',
+              "locales = [" + ", ".join(quote(x) for x in edge.get("locales", ["en-US", "en-GB"])) + "]"]
+    if edge.get("default_voice"):
+        lines.append(f'default_voice = {quote(edge["default_voice"])}')
+    eleven = providers.get("elevenlabs", {})
+    lines += ["", "[providers.elevenlabs]", f'enabled = {str(bool(eleven.get("enabled", False))).lower()}',
+              f'model = {quote(eleven.get("model", "eleven_flash_v2_5"))}',
+              f'credential_file = {quote(eleven.get("credential_file", config_dir() / "credentials/elevenlabs-api-key"))}']
+    if eleven.get("default_voice"):
+        lines.append(f'default_voice = {quote(eleven["default_voice"])}')
+    if eleven.get("languages"):
+        lines.append("languages = [" + ", ".join(quote(x) for x in eleven["languages"]) + "]")
+    for voice in eleven.get("voices", []):
+        lines += ["", "[[providers.elevenlabs.voices]]", f'id = {quote(voice["id"])}',
+                  f'name = {quote(voice["name"])}', f'language = {quote(voice.get("language", "en-US"))}']
+    grok = providers.get("grok", {})
+    lines += ["", "[providers.grok]", f'enabled = {str(bool(grok.get("enabled", False))).lower()}',
+              f'credential_file = {quote(grok.get("credential_file", config_dir() / "credentials/grok-key"))}',
+              f'automatic_language = {str(bool(grok.get("automatic_language", True))).lower()}']
+    if grok.get("default_voice"):
+        lines.append(f'default_voice = {quote(grok["default_voice"])}')
+    routing = doc.get("routing", {})
+    lines += ["", "[routing]",
+              f'auto_detect = {str(bool(routing.get("auto_detect", True))).lower()}',
+              f'minimum_characters = {int(routing.get("minimum_characters", 40))}',
+              f'minimum_confidence = {float(routing.get("minimum_confidence", .8))}',
+              f'default_language = {quote(routing.get("default_language", "en-US"))}',
+              "provider_order = [" + ", ".join(quote(x) for x in routing.get("provider_order", ["elevenlabs", "grok", "edge", "local"])) + "]",
+              f'cross_language_fallback = {str(bool(routing.get("cross_language_fallback", True))).lower()}',
+              "", "[routing.voices]"]
+    for language, route in sorted(routing.get("voices", {}).items()):
+        if isinstance(route, str): route = [route]
+        lines.append(f'{quote(language)} = [' + ", ".join(quote(x) for x in route) + "]")
+    return "\n".join(lines) + "\n"
+
+
+def restart() -> None:
+    subprocess.run(["systemctl", "--user", "try-restart", "uttermux.service"], check=False)
+    subprocess.run(["systemctl", "--user", "try-restart", "speech-dispatcher.service"], check=False)
+
+
+def setup(_args):
+    doc = read_config()
+    doc.setdefault("max_loaded_models", 2)
+    doc.setdefault("fallback_voice", "sherpa/vits-piper-en_US-lessac-medium/lessac")
+    doc.setdefault("default_voice", doc["fallback_voice"])
+    doc.setdefault("providers", {})
+    routing = doc.setdefault("routing", {})
+    routing.setdefault("auto_detect", True); routing.setdefault("minimum_characters", 40)
+    routing.setdefault("minimum_confidence", .8); routing.setdefault("default_language", "en-US")
+    routing.setdefault("provider_order", ["elevenlabs", "grok", "edge", "local"])
+    routing.setdefault("cross_language_fallback", True); routing.setdefault("voices", {})
+    atomic_write(config_path(), render_config(doc))
+    old_models = config_dir().parent / "speech-dispatcher-sherpa/models.d"
+    new_models = config_dir() / "models.d"
+    new_models.mkdir(parents=True, exist_ok=True)
+    if old_models.is_dir():
+        for source in old_models.glob("*.toml"):
+            target = new_models / source.name
+            if not target.exists(): shutil.copy2(source, target)
+    speechd = config_dir().parent / "speech-dispatcher/speechd.conf"
+    speechd.parent.mkdir(parents=True, exist_ok=True)
+    current = speechd.read_text(encoding="utf-8") if speechd.exists() else ""
+    begin, end = "# BEGIN uttermux", "# END uttermux"
+    block = f'{begin}\nAddModule "uttermux" "sd_uttermux" "uttermux.conf"\nDefaultModule "uttermux"\n{end}'
+    if begin not in current: atomic_write(speechd, current.rstrip() + "\n\n" + block + "\n")
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+    subprocess.run(["systemctl", "--user", "enable", "--now", "uttermux.socket"], check=True)
+    restart()
+    print("UtterMux configured as the default Speech Dispatcher module.")
+
+
+def language_matches(capability: str | None, requested: str | None) -> bool:
+    capability = str(capability or "").replace("_", "-").casefold()
+    requested = str(requested or "").replace("_", "-").casefold()
+    if not capability or not requested: return False
+    return capability == requested or capability.split("-", 1)[0] == requested.split("-", 1)[0]
+
+
+def voice_records():
+    for voice_id, name, native, provider, model, capabilities in voices():
+        yield {"id": voice_id, "name": name, "native_language": native, "provider": provider,
+               "model": model, "languages": [x for x in capabilities.split(",") if x] or [native]}
+
+
+def cmd_voices(args):
+    records = list(voice_records())
+    if args.language: records = [r for r in records if any(language_matches(x, args.language) for x in r["languages"])]
+    if args.provider: records = [r for r in records if r["provider"].casefold() == args.provider.casefold()]
+    if args.model: records = [r for r in records if args.model.casefold() in r["model"].casefold()]
+    if args.search:
+        terms = args.search.casefold().split()
+        records = [r for r in records if all(term in " ".join([r["id"], r["name"], r["native_language"],
+                   r["provider"], r["model"], *r["languages"]]).casefold() for term in terms)]
+    if args.json:
+        print(json.dumps(records, ensure_ascii=False, indent=2)); return
+    for record in records:
+        print("\t".join((record["id"], record["name"], record["native_language"], record["provider"],
+                         record["model"], ",".join(record["languages"]))))
+
+
+def cmd_default(args):
+    known = {record["id"] for record in voice_records()}
+    if args.voice not in known: raise RuntimeError(f"unknown voice: {args.voice}")
+    doc = read_config(); doc.setdefault("providers", {})
+    doc["default_voice"] = args.voice
+    if args.language:
+        routes = doc.setdefault("routing", {}).setdefault("voices", {})
+        current = routes.get(args.language, [])
+        if isinstance(current, str): current = [current]
+        routes[args.language] = [args.voice] + [item for item in current if item != args.voice]
+    atomic_write(config_path(), render_config(doc)); restart()
+
+
+def cmd_routes(_args):
+    routing = read_config().get("routing", {})
+    print(f"default\t{read_config().get('default_voice', '')}")
+    for language, route in sorted(routing.get("voices", {}).items()):
+        if isinstance(route, str): route = [route]
+        print(f"{language}\t" + "\t".join(route))
+
+
+def elevenlabs_key(doc: dict) -> str:
+    cfg = doc.get("providers", {}).get("elevenlabs", {})
+    path = Path(cfg.get("credential_file", config_dir() / "credentials/elevenlabs-api-key"))
+    key = path.read_text(encoding="utf-8").strip()
+    if not key: raise RuntimeError("ElevenLabs credential is empty")
+    return key
+
+
+def cmd_discover(args):
+    records = []
+    if args.provider in (None, "elevenlabs"):
+        document = read_config(); cfg = document.get("providers", {}).get("elevenlabs", {})
+        if cfg.get("enabled", False):
+            query = {"page_size": min(100, args.limit), "sort": "trending"}
+            if args.language: query["language"] = args.language.split("-", 1)[0]
+            if args.search: query["search"] = args.search
+            request = urllib.request.Request("https://api.elevenlabs.io/v1/shared-voices?" + urllib.parse.urlencode(query),
+                headers={"xi-api-key": elevenlabs_key(document), "Accept": "application/json"})
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response: result = json.load(response)
+            except urllib.error.HTTPError as error:
+                raise RuntimeError(f"ElevenLabs library HTTP {error.code}: {error.read(1024).decode(errors='replace')}") from None
+            known = {voice["id"] for voice in cfg.get("voices", [])}
+            for voice in result.get("voices", []):
+                if voice.get("voice_id") in known: continue
+                verified = voice.get("verified_languages") or []
+                match = next((item for item in verified if not args.language or language_matches(item.get("locale", item.get("language", "")), args.language)), None)
+                native = (match or {}).get("locale") or voice.get("language") or args.language or "und"
+                records.append({"id": f"elevenlabs/{voice['voice_id']}", "name": voice.get("name", voice["voice_id"]),
+                    "native_language": native, "provider": "elevenlabs", "model": cfg.get("model", "eleven_flash_v2_5"),
+                    "languages": [native], "state": "add", "owner_id": voice.get("public_owner_id", ""),
+                    "accent": (match or {}).get("accent") or voice.get("accent", ""),
+                    "description": voice.get("description", ""), "preview_url": (match or {}).get("preview_url") or voice.get("preview_url", "")})
+    if args.provider in (None, "local"):
+        catalog_path = Path(os.environ.get("UTTERMUX_CATALOG", "/usr/share/uttermux/catalog.toml"))
+        if not catalog_path.is_file(): catalog_path = Path(__file__).resolve().parents[1] / "catalog/catalog.toml"
+        if catalog_path.is_file():
+            with catalog_path.open("rb") as stream: catalog = tomllib.load(stream)
+            installed = {record["id"] for record in voice_records() if record["provider"] == "local"}
+            for model in catalog.get("model", []):
+                for voice in model.get("voices", []):
+                    voice_id = f"sherpa/{model['id']}/{voice['id']}"
+                    if voice_id in installed: continue
+                    language = voice.get("language", "und")
+                    haystack = " ".join((voice.get("name", ""), model.get("id", ""), model.get("description", ""), language)).casefold()
+                    if args.language and not language_matches(language, args.language): continue
+                    if args.search and not all(term in haystack for term in args.search.casefold().split()): continue
+                    records.append({"id": voice_id, "name": voice["name"], "native_language": language,
+                        "provider": "local", "model": model["id"], "languages": [language], "state": "install",
+                        "model_id": model["id"], "description": model.get("description", "")})
+    print(json.dumps(records, ensure_ascii=False, indent=2))
+
+
+def cmd_add_voice(args):
+    if args.provider != "elevenlabs": raise RuntimeError(f"provider does not require importing: {args.provider}")
+    if not args.owner: raise RuntimeError("ElevenLabs shared voice is missing its owner ID")
+    document = read_config()
+    external_id = args.voice.removeprefix("elevenlabs/")
+    url = f"https://api.elevenlabs.io/v1/voices/add/{urllib.parse.quote(args.owner)}/{urllib.parse.quote(external_id)}"
+    body = json.dumps({"new_name": args.name, "bookmarked": True}).encode()
+    request = urllib.request.Request(url, data=body, method="POST", headers={
+        "xi-api-key": elevenlabs_key(document), "Content-Type": "application/json", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=20): pass
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"ElevenLabs add voice HTTP {error.code}: {error.read(1024).decode(errors='replace')}") from None
+    cfg = document.setdefault("providers", {}).setdefault("elevenlabs", {})
+    entries = cfg.setdefault("voices", [])
+    entries[:] = [item for item in entries if item.get("id") != external_id]
+    entries.append({"id": external_id, "name": args.name, "language": args.language})
+    atomic_write(config_path(), render_config(document)); restart()
+    print(f"Added {args.name} ({args.language})")
+
+
+def cmd_key(args):
+    path = config_dir() / "credentials/elevenlabs-api-key"
+    atomic_write(path, args.key.strip() + "\n")
+    print(f"Stored ElevenLabs API key in {path}")
+
+
+def cmd_provider(args):
+    doc = read_config(); providers = doc.setdefault("providers", {}); cfg = providers.setdefault(args.provider, {})
+    cfg["enabled"] = args.state == "enable"
+    order = doc.setdefault("routing", {}).setdefault(
+        "provider_order", ["elevenlabs", "grok", "edge", "local"])
+    if cfg["enabled"] and args.provider not in order:
+        order.insert(order.index("local") if "local" in order else len(order), args.provider)
+    atomic_write(config_path(), render_config(doc)); restart()
+
+
+def cmd_provider_default(args):
+    record = next((record for record in voice_records() if record["id"] == args.voice), None)
+    if not record or record["provider"] != args.provider:
+        raise RuntimeError(f"voice {args.voice} does not belong to provider {args.provider}")
+    doc = read_config(); cfg = doc.setdefault("providers", {}).setdefault(args.provider, {})
+    cfg["default_voice"] = args.voice
+    atomic_write(config_path(), render_config(doc)); restart()
+
+
+def cmd_edge_locales(args):
+    doc = read_config(); edge = doc.setdefault("providers", {}).setdefault("edge", {})
+    edge["locales"] = args.locales
+    atomic_write(config_path(), render_config(doc)); restart()
+
+
+def cmd_eleven_voice(args):
+    doc = read_config(); cfg = doc.setdefault("providers", {}).setdefault("elevenlabs", {})
+    records = cfg.setdefault("voices", [])
+    records[:] = [record for record in records if record.get("id") != args.id]
+    records.append({"id": args.id, "name": args.name, "language": args.language})
+    atomic_write(config_path(), render_config(doc)); restart()
+
+
+def cmd_model(args):
+    manager = Path("/usr/lib/uttermux/model-manager")
+    if not manager.exists(): manager = Path(__file__).with_name("sherpa-voice")
+    command = [str(manager), "model", args.action]
+    if args.model_id: command.append(args.model_id)
+    subprocess.run(command, check=True)
+
+
+def cmd_preview(args):
+    record = next((record for record in voice_records() if record["id"] == args.voice or record["name"] == args.voice), None)
+    if not record: raise RuntimeError(f"unknown voice: {args.voice}")
+    command = ["spd-say", "-o", "uttermux", "-y", record["name"]]
+    if args.language: command += ["-l", args.language]
+    subprocess.run(command + ["-w", args.text], check=True)
+
+
+def cmd_preview_url(args):
+    parsed = urllib.parse.urlparse(args.url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise RuntimeError("preview URL must be HTTPS")
+    request = urllib.request.Request(args.url, headers={"User-Agent": "UtterMux/1"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        # Decode explicitly to mono PCM; this also supports MP3 and WAV catalog samples.
+        decoder = subprocess.Popen([
+            "ffmpeg", "-nostdin", "-loglevel", "error", "-i", "pipe:0", "-f", "s16le",
+            "-acodec", "pcm_s16le", "-ar", "24000", "-ac", "1", "pipe:1"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        playback = subprocess.Popen(["paplay", "--raw", "--format=s16le", "--rate=24000", "--channels=1"],
+                                    stdin=decoder.stdout)
+        decoder.stdout.close()
+        try:
+            shutil.copyfileobj(response, decoder.stdin)
+            decoder.stdin.close()
+            if decoder.wait() or playback.wait():
+                raise RuntimeError("could not play catalog preview")
+        finally:
+            if decoder.poll() is None: decoder.terminate()
+            if playback.poll() is None: playback.terminate()
+
+
+def detect_text(text: str) -> tuple[str, float, str]:
+    routing = read_config().get("routing", {})
+    if sum(character.isalpha() for character in text) < int(routing.get("minimum_characters", 40)):
+        return "", 0, "insufficient-text"
+    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+    for path in (Path("/usr/lib/uttermux/vendor"), data_home / "uttermux/vendor",
+                 Path(__file__).resolve().parents[1] / "daemon/vendor"):
+        if path.is_dir(): sys.path.insert(0, str(path))
+    try:
+        from py3langid.langid import LanguageIdentifier, MODEL_FILE
+    except ImportError as error:
+        raise RuntimeError("py3langid is not installed") from error
+    detector = LanguageIdentifier.from_pickled_model(MODEL_FILE, norm_probs=True)
+    language, confidence = detector.classify(text)
+    minimum = float(routing.get("minimum_confidence", .8))
+    return (language if float(confidence) >= minimum else "", float(confidence),
+            "detected" if float(confidence) >= minimum else "low-confidence")
+
+
+def cmd_detect(args):
+    text = args.text if args.text != "-" else sys.stdin.read()
+    language, confidence, reason = detect_text(text)
+    if language: print(f"{language}\t{confidence:.6f}")
+    else: print(f"{read_config().get('routing', {}).get('default_language', 'en-US')}\t{reason}")
+
+
+def cmd_selection(args):
+    direct_text = ""
+    # XWayland applications such as Zotero's PDF view often do not publish a
+    # Wayland primary selection. Copy their focused selection explicitly.
+    sway_socket = os.environ.get("SWAYSOCK")
+    if sway_socket and shutil.which("swaymsg"):
+        tree = subprocess.run(["swaymsg", "-t", "get_tree"], text=True, capture_output=True)
+        try:
+            document = json.loads(tree.stdout)
+            stack = [document]; focused = None
+            while stack:
+                node = stack.pop()
+                if node.get("focused"):
+                    focused = node; break
+                stack.extend(node.get("nodes", [])); stack.extend(node.get("floating_nodes", []))
+            identity = " ".join(str(value or "") for value in (
+                focused.get("app_id") if focused else "", focused.get("name") if focused else "",
+                (focused.get("window_properties") or {}).get("class") if focused else "")).casefold()
+            if "emacs" in identity and shutil.which("emacsclient"):
+                expression = ('(if (use-region-p) '
+                    '(base64-encode-string (buffer-substring-no-properties '
+                    '(region-beginning) (region-end)) t) "")')
+                result = subprocess.run(["emacsclient", "--eval", expression], text=True, capture_output=True)
+                encoded = result.stdout.strip()
+                if encoded.startswith('"') and encoded.endswith('"'): encoded = json.loads(encoded)
+                if encoded: direct_text = base64.b64decode(encoded).decode("utf-8")
+            elif focused and focused.get("window") is not None and shutil.which("xdotool"):
+                subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+c"], check=False)
+                time.sleep(.15)
+                args.clipboard = True
+        except (json.JSONDecodeError, AttributeError, ValueError, UnicodeDecodeError):
+            pass
+    candidates = (["wl-paste", "--no-newline"] if args.clipboard else ["wl-paste", "--primary", "--no-newline"]), \
+                 (["xclip", "-o", "-selection", "clipboard"] if args.clipboard else ["xclip", "-o", "-selection", "primary"]), \
+                 (["xsel", "--clipboard", "--output"] if args.clipboard else ["xsel", "--primary", "--output"])
+    text = direct_text
+    if not text:
+        for command in candidates:
+            if shutil.which(command[0]):
+                result = subprocess.run(command, text=True, capture_output=True)
+                if result.returncode == 0 and result.stdout.strip(): text = result.stdout; break
+    if not text: raise RuntimeError("no readable selection found (install wl-clipboard, xclip, or xsel)")
+    command = ["spd-say", "-o", "uttermux"]
+    default_id = read_config().get("default_voice", "")
+    selected = next((record for record in voice_records() if record["id"] == default_id), None)
+    if selected: command += ["-y", selected["name"]]
+    language = args.language
+    if not language:
+        language, _confidence, _reason = detect_text(text)
+    if language: command += ["-l", language]
+    subprocess.run(command + ["-w", text], check=True)
+
+
+def doctor(_args):
+    checks = {"sd_uttermux": any(p.exists() for p in [Path("/usr/lib/speech-dispatcher/speech-dispatcher-modules/sd_uttermux"), Path("/usr/local/lib/speech-dispatcher/speech-dispatcher-modules/sd_uttermux")]),
+              "uttermux socket": socket_path().exists(), "spd-say": bool(shutil.which("spd-say")),
+              "ffmpeg": bool(shutil.which("ffmpeg")), "local models": (config_dir() / "models.d").is_dir()}
+    for name, okay in checks.items(): print(f"{'OK' if okay else 'FAIL'}  {name}")
+    try:
+        next(iter(transact(HEALTH)), None); print("OK  broker protocol")
+    except Exception as error: print(f"FAIL  broker protocol: {error}"); checks["broker"] = False
+    if not all(checks.values()): raise RuntimeError("one or more checks failed")
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="uttermux")
+    sub = parser.add_subparsers(required=True)
+    sub.add_parser("setup").set_defaults(func=setup)
+    p = sub.add_parser("voices"); p.add_argument("--language"); p.add_argument("--provider")
+    p.add_argument("--model"); p.add_argument("--search"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_voices)
+    p = sub.add_parser("default"); p.add_argument("voice"); p.add_argument("--language"); p.set_defaults(func=cmd_default)
+    p = sub.add_parser("routes"); p.set_defaults(func=cmd_routes)
+    p = sub.add_parser("discover"); p.add_argument("--provider", choices=("elevenlabs", "grok", "edge", "local")); p.add_argument("--language"); p.add_argument("--search"); p.add_argument("--limit", type=int, default=30); p.set_defaults(func=cmd_discover)
+    p = sub.add_parser("add-voice"); p.add_argument("provider", choices=("elevenlabs",)); p.add_argument("voice"); p.add_argument("--owner", required=True); p.add_argument("--name", required=True); p.add_argument("--language", required=True); p.set_defaults(func=cmd_add_voice)
+    p = sub.add_parser("detect"); p.add_argument("text", nargs="?", default="-"); p.set_defaults(func=cmd_detect)
+    p = sub.add_parser("preview"); p.add_argument("voice"); p.add_argument("text", nargs="?", default="UtterMux voice preview."); p.add_argument("--language"); p.set_defaults(func=cmd_preview)
+    p = sub.add_parser("preview-url"); p.add_argument("url"); p.set_defaults(func=cmd_preview_url)
+    p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
+    p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.set_defaults(func=cmd_provider)
+    p = sub.add_parser("provider-default"); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
+    p = sub.add_parser("edge-locales"); p.add_argument("locales", nargs="+"); p.set_defaults(func=cmd_edge_locales)
+    p = sub.add_parser("elevenlabs-key"); p.add_argument("key"); p.set_defaults(func=cmd_key)
+    p = sub.add_parser("elevenlabs-voice"); p.add_argument("id"); p.add_argument("name"); p.add_argument("language", nargs="?", default="en-US"); p.set_defaults(func=cmd_eleven_voice)
+    p = sub.add_parser("model"); p.add_argument("action", choices=("list", "install", "remove")); p.add_argument("model_id", nargs="?"); p.set_defaults(func=cmd_model)
+    sub.add_parser("doctor").set_defaults(func=doctor)
+    args = parser.parse_args()
+    try: args.func(args); return 0
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error: print(f"uttermux: {error}", file=sys.stderr); return 1
+
+
+if __name__ == "__main__": raise SystemExit(main())

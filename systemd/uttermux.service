@@ -1,0 +1,17 @@
+[Unit]
+Description=UtterMux universal text-to-speech provider broker
+Requires=uttermux.socket
+After=uttermux.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/uttermux/uttermuxd
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+Also=uttermux.socket

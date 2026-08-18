@@ -1,0 +1,7 @@
+schema_version = 1
+fallback_voice = "sherpa/vits-piper-en_US-lessac-medium/lessac"
+default_voice = "sherpa/vits-piper-en_US-lessac-medium/lessac"
+
+[providers.edge]
+enabled = true
+locales = ["en-US"]

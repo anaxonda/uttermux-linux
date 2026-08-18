@@ -1,0 +1,15 @@
+[Unit]
+Description=UtterMux KOReader compatibility bridge
+After=uttermux.socket
+Requires=uttermux.socket
+
+[Service]
+ExecStart=/usr/lib/uttermux/koreader-bridge --host 127.0.0.1 --port 5000
+Restart=on-failure
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=default.target

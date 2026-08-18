@@ -1,0 +1,11 @@
+/build/
+/build-*/
+/.agents/
+/.codex/
+__pycache__/
+*.pyc
+.cache/
+.venv/
+*.pkg.tar.*
+/packaging/arch/src/
+/packaging/arch/pkg/

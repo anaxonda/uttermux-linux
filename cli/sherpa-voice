@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""Install and manage local sherpa-onnx Speech Dispatcher voices."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import tomllib
+
+APP = "uttermux"
+MODEL_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+
+def data_home() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+
+
+def cache_home() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+
+
+def catalog_path() -> Path:
+    override = os.environ.get("SHERPA_VOICE_CATALOG")
+    if override:
+        return Path(override)
+    installed = Path("/usr/share") / APP / "catalog.toml"
+    if installed.exists():
+        return installed
+    return Path(__file__).resolve().parents[1] / "catalog" / "catalog.toml"
+
+
+def load_catalog() -> dict[str, dict]:
+    with catalog_path().open("rb") as f:
+        doc = tomllib.load(f)
+    if doc.get("schema_version") != 1:
+        raise RuntimeError("unsupported catalog schema")
+    return {item["id"]: item for item in doc.get("model", [])}
+
+
+def q(value: str | Path) -> str:
+    s = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{s}"'
+
+
+def model_root(model_id: str) -> Path:
+    if not MODEL_ID_RE.fullmatch(model_id):
+        raise RuntimeError(f"invalid model id: {model_id}")
+    return data_home() / APP / "models" / model_id
+
+
+def manifest_dir() -> Path:
+    return config_home() / APP / "models.d"
+
+
+def render_manifest(item: dict, root: Path) -> str:
+    lines = ["schema_version = 1", f"id = {q(item['id'])}", f"engine = {q(item['engine'])}",
+             f"root = {q(root)}", "provider = \"cpu\"", "", "[files]"]
+    for key, value in item["files"].items():
+        lines.append(f"{key} = {q(value)}")
+    for voice in item.get("voices", []):
+        lines += ["", "[[voice]]", f"id = {q(voice['id'])}", f"name = {q(voice['name'])}",
+                  f"language = {q(voice['language'])}", f"speaker_id = {int(voice.get('speaker_id', 0))}"]
+    return "\n".join(lines) + "\n"
+
+
+def atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp, path)
+    finally:
+        try:
+            os.unlink(temp)
+        except FileNotFoundError:
+            pass
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def safe_extract(archive: Path, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    base = destination.resolve()
+    with tarfile.open(archive, "r:*") as tf:
+        for member in tf.getmembers():
+            target = (destination / member.name).resolve()
+            if not target.is_relative_to(base):
+                raise RuntimeError(f"unsafe archive path: {member.name}")
+            if member.issym() or member.islnk():
+                link = (target.parent / member.linkname).resolve()
+                if not link.is_relative_to(base):
+                    raise RuntimeError(f"unsafe archive link: {member.name}")
+        tf.extractall(destination, filter="data")
+
+
+def restart_speechd(no_restart: bool) -> None:
+    if no_restart:
+        return
+    result = subprocess.run(["systemctl", "--user", "try-restart", "speech-dispatcher.service"],
+                            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if result.returncode:
+        print("Voice files changed; restart Speech Dispatcher before use.", file=sys.stderr)
+    subprocess.run(["systemctl", "--user", "try-restart", "uttermux.service"],
+                   check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def install_model(model_id: str, no_restart: bool = False) -> None:
+    catalog = load_catalog()
+    if model_id not in catalog:
+        raise RuntimeError(f"unknown catalog model: {model_id}")
+    item = catalog[model_id]
+    if item.get("id") != model_id:
+        raise RuntimeError(f"catalog key/id mismatch for {model_id}")
+    expected = item.get("sha256", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise RuntimeError(f"catalog entry {model_id} has no verified SHA-256")
+    final = model_root(model_id)
+    if final.exists():
+        for relative in item["files"].values():
+            if not (final / relative).exists():
+                raise RuntimeError(f"incomplete existing installation lacks: {relative}")
+        atomic_write(manifest_dir() / f"{model_id}.toml", render_manifest(item, final))
+        print(f"{model_id} is already installed; manifest verified")
+        return
+    downloads = cache_home() / APP / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    archive = downloads / Path(item["url"]).name
+    subprocess.run(["curl", "--fail", "--location", "--retry", "3", "--continue-at", "-",
+                    "--output", str(archive), item["url"]], check=True)
+    actual = sha256(archive)
+    if actual != expected:
+        raise RuntimeError(f"SHA-256 mismatch for {model_id}: expected {expected}, got {actual}")
+    parent = final.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    temp = Path(tempfile.mkdtemp(prefix=f".{model_id}.", dir=parent))
+    try:
+        safe_extract(archive, temp)
+        children = [p for p in temp.iterdir()]
+        source = children[0] if len(children) == 1 and children[0].is_dir() else temp
+        for relative in item["files"].values():
+            if not (source / relative).exists():
+                raise RuntimeError(f"archive lacks required file: {relative}")
+        if source == temp:
+            os.replace(temp, final)
+        else:
+            os.replace(source, final)
+            temp.rmdir()
+        atomic_write(manifest_dir() / f"{model_id}.toml", render_manifest(item, final))
+    except Exception:
+        shutil.rmtree(temp, ignore_errors=True)
+        raise
+    print(f"Installed {model_id}")
+    restart_speechd(no_restart)
+
+
+def speechd_config(default_voice: str = "Kokoro Heart") -> str:
+    module = config_home() / "speech-dispatcher/modules/sherpa.conf"
+    return "\n".join([
+        "# Managed by sherpa-voice",
+        'SymbolsPreproc "char"',
+        'SymbolsPreprocFile "gender-neutral.dic"',
+        'SymbolsPreprocFile "font-variants.dic"',
+        'SymbolsPreprocFile "symbols.dic"',
+        'SymbolsPreprocFile "emojis.dic"',
+        'SymbolsPreprocFile "orca.dic"',
+        'SymbolsPreprocFile "orca-chars.dic"',
+        f'AddModule "sherpa" "sd_sherpa" "{module}"',
+        'DefaultModule "sherpa"',
+        'Include "clients/*.conf"', ""])
+
+
+def module_config(default_voice: str = "Kokoro Heart") -> str:
+    return "\n".join(["schema_version = 1", f"default_voice = {q(default_voice)}",
+                      "max_loaded_models = 2", "num_threads = 4", 'provider = "cpu"',
+                      f"manifests_dir = {q(manifest_dir())}", ""])
+
+
+def backup(path: Path) -> None:
+    if path.exists():
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(path, path.with_name(f"{path.name}.backup-{stamp}"))
+
+
+def enable_module() -> None:
+    target = config_home() / "speech-dispatcher/speechd.conf"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        current = target.read_text(encoding="utf-8")
+        backup(target)
+        begin, end = "# BEGIN speech-dispatcher-sherpa", "# END speech-dispatcher-sherpa"
+        block = f'{begin}\nAddModule "sherpa" "sd_sherpa" "{config_home() / "speech-dispatcher/modules/sherpa.conf"}"\nDefaultModule "sherpa"\n{end}'
+        if begin in current and end in current:
+            pattern = re.compile(re.escape(begin) + r".*?" + re.escape(end), re.DOTALL)
+            atomic_write(target, pattern.sub(block, current).rstrip() + "\n")
+        elif "THIS CONFIG WAS GENERATED BY PIED" not in current and "Managed by sherpa-voice" not in current:
+            atomic_write(target, current.rstrip() + "\n\n" + block + "\n")
+        else:
+            atomic_write(target, speechd_config())
+    else:
+        atomic_write(target, speechd_config())
+    atomic_write(config_home() / "speech-dispatcher/modules/sherpa.conf", module_config())
+
+
+def cmd_setup(args: argparse.Namespace) -> None:
+    install_model("kokoro-multi-lang-v1_0", True)
+    enable_module()
+    restart_speechd(args.no_restart)
+    print("Kokoro Heart is now the default Speech Dispatcher voice.")
+
+
+def installed() -> list[tuple[str, dict]]:
+    result = []
+    for path in sorted(manifest_dir().glob("*.toml")):
+        try:
+            with path.open("rb") as f:
+                result.append((path.stem, tomllib.load(f)))
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            print(f"warning: {path}: {e}", file=sys.stderr)
+    return result
+
+
+def cmd_catalog(_: argparse.Namespace) -> None:
+    for item in load_catalog().values():
+        state = "installed" if model_root(item["id"]).exists() else "available"
+        print(f"{item['id']:<36} {item['engine']:<8} {state}  {item.get('description', '')}")
+
+
+def cmd_model_list(_: argparse.Namespace) -> None:
+    for model_id, doc in installed():
+        print(f"{model_id}\t{doc.get('engine', '?')}\t{doc.get('root', '?')}")
+
+
+def cmd_voice_list(_: argparse.Namespace) -> None:
+    for model_id, doc in installed():
+        for voice in doc.get("voice", []):
+            print(f"{voice['name']}\t{voice['language']}\t{model_id}/{voice['id']}")
+
+
+def cmd_remove(args: argparse.Namespace) -> None:
+    root = model_root(args.model_id)
+    manifest = manifest_dir() / f"{args.model_id}.toml"
+    if not root.exists() and not manifest.exists():
+        raise RuntimeError(f"not installed: {args.model_id}")
+    module_path = config_home() / "speech-dispatcher/modules/sherpa.conf"
+    if manifest.exists() and module_path.exists() and not args.force:
+        with manifest.open("rb") as f: model_doc = tomllib.load(f)
+        with module_path.open("rb") as f: module_doc = tomllib.load(f)
+        voice_names = {voice.get("name") for voice in model_doc.get("voice", [])}
+        if module_doc.get("default_voice") in voice_names:
+            raise RuntimeError("refusing to remove the active default voice model; select another default or use --force")
+    if not args.yes:
+        answer = input(f"Remove {args.model_id} and its model data? [y/N] ")
+        if answer.lower() not in {"y", "yes"}:
+            return
+    if root.exists():
+        shutil.rmtree(root)
+    manifest.unlink(missing_ok=True)
+    restart_speechd(args.no_restart)
+
+
+def cmd_default(args: argparse.Namespace) -> None:
+    names = {v["name"] for _, doc in installed() for v in doc.get("voice", [])}
+    if args.voice not in names:
+        raise RuntimeError(f"unknown installed voice: {args.voice}")
+    atomic_write(config_home() / "speech-dispatcher/modules/sherpa.conf", module_config(args.voice))
+    restart_speechd(args.no_restart)
+
+
+def cmd_preview(args: argparse.Namespace) -> None:
+    subprocess.run(["spd-say", "-o", "sherpa", "-y", args.voice, "-w", args.text], check=True)
+
+
+def cmd_selection(args: argparse.Namespace) -> None:
+    commands = []
+    if not args.clipboard:
+        commands += [["wl-paste", "--primary", "--no-newline"], ["xclip", "-o", "-selection", "primary"], ["xsel", "--primary", "--output"]]
+    else:
+        commands += [["wl-paste", "--no-newline"], ["xclip", "-o", "-selection", "clipboard"], ["xsel", "--clipboard", "--output"]]
+    text = ""
+    for command in commands:
+        if shutil.which(command[0]):
+            result = subprocess.run(command, text=True, capture_output=True, check=False)
+            if result.returncode == 0 and result.stdout.strip():
+                text = result.stdout; break
+    if not text.strip():
+        raise RuntimeError("no readable selection found")
+    subprocess.run(["spd-say", "-o", "sherpa", "-w", text], check=True)
+
+
+def cmd_doctor(_: argparse.Namespace) -> None:
+    failures = 0
+    module_candidates = [Path(p) / "speech-dispatcher/speech-dispatcher-modules/sd_sherpa"
+                         for p in ("/usr/lib", "/usr/local/lib")]
+    module_candidates += [Path("/usr/libexec/speech-dispatcher-modules/sd_sherpa")]
+    module_found = shutil.which("sd_sherpa") or next((str(p) for p in module_candidates if p.is_file()), None)
+    print(f"{'OK' if module_found else 'FAIL'}  sd_sherpa: {module_found or 'not found'}")
+    failures += not bool(module_found)
+    for binary in ("spd-say", "curl"):
+        found = shutil.which(binary)
+        print(f"{'OK' if found else 'FAIL'}  {binary}: {found or 'not found'}")
+        failures += not bool(found)
+    try:
+        catalog = load_catalog(); print(f"OK  catalog: {len(catalog)} models")
+    except Exception as e:
+        print(f"FAIL catalog: {e}"); failures += 1
+    voices = sum(len(doc.get("voice", [])) for _, doc in installed())
+    print(f"{'OK' if voices else 'FAIL'}  installed voices: {voices}")
+    failures += not bool(voices)
+    lib = subprocess.run(["ldconfig", "-p"], text=True, capture_output=True, check=False)
+    has_lib = "libsherpa-onnx-c-api.so" in lib.stdout
+    print(f"{'OK' if has_lib else 'FAIL'}  sherpa C runtime")
+    failures += not has_lib
+    raise SystemExit(1 if failures else 0)
+
+
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="sherpa-voice")
+    sub = p.add_subparsers(dest="command", required=True)
+    s = sub.add_parser("setup"); s.add_argument("--no-restart", action="store_true"); s.set_defaults(func=cmd_setup)
+    s = sub.add_parser("catalog"); s.add_argument("action", choices=["list"]); s.set_defaults(func=cmd_catalog)
+    s = sub.add_parser("model"); ms = s.add_subparsers(dest="action", required=True)
+    x = ms.add_parser("list"); x.set_defaults(func=cmd_model_list)
+    x = ms.add_parser("install"); x.add_argument("model_id"); x.add_argument("--no-restart", action="store_true"); x.set_defaults(func=lambda a: install_model(a.model_id, a.no_restart))
+    x = ms.add_parser("remove"); x.add_argument("model_id"); x.add_argument("--yes", action="store_true"); x.add_argument("--force", action="store_true"); x.add_argument("--no-restart", action="store_true"); x.set_defaults(func=cmd_remove)
+    s = sub.add_parser("voice"); vs = s.add_subparsers(dest="action", required=True)
+    x = vs.add_parser("list"); x.set_defaults(func=cmd_voice_list)
+    x = vs.add_parser("default"); x.add_argument("voice"); x.add_argument("--no-restart", action="store_true"); x.set_defaults(func=cmd_default)
+    x = vs.add_parser("preview"); x.add_argument("voice"); x.add_argument("text", nargs="?", default="The quick brown fox jumps over the lazy dog."); x.set_defaults(func=cmd_preview)
+    s = sub.add_parser("speak-selection"); s.add_argument("--clipboard", action="store_true"); s.set_defaults(func=cmd_selection)
+    s = sub.add_parser("doctor"); s.set_defaults(func=cmd_doctor)
+    return p
+
+
+def main() -> int:
+    try:
+        args = parser().parse_args(); args.func(args); return 0
+    except (RuntimeError, OSError, subprocess.CalledProcessError) as e:
+        print(f"sherpa-voice: {e}", file=sys.stderr); return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
