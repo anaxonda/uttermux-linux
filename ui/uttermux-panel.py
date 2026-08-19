@@ -75,7 +75,12 @@ class Panel(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="UtterMux")
         self.add_css_class("uttermux-window")
-        self.set_default_size(520, 650)
+        # Keep the layer-shell surface close to the visible panel.  A transparent
+        # full-screen surface makes even small GTK updates (such as the search
+        # cursor blinking) damage/composite the entire output.
+        self.set_default_size(548, 710)
+        self.was_active = False
+        self.connect("notify::is-active", self.active_changed)
         self.records = voices()
         self.installed_records = list(self.records)
         self.discovery_token = 0
@@ -88,8 +93,8 @@ class Panel(Gtk.ApplicationWindow):
             Gtk4LayerShell.set_layer(self, Gtk4LayerShell.Layer.OVERLAY)
             Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.TOP, True)
             Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.RIGHT, True)
-            Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.BOTTOM, True)
-            Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.LEFT, True)
+            Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.BOTTOM, False)
+            Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.LEFT, False)
             Gtk4LayerShell.set_keyboard_mode(self, Gtk4LayerShell.KeyboardMode.ON_DEMAND)
 
         keys = Gtk.EventControllerKey()
@@ -148,7 +153,21 @@ class Panel(Gtk.ApplicationWindow):
             else: button.connect("clicked", self.preview)
             actions.append(button)
         root.append(actions); self.refresh_facets(); self.rebuild()
-        GLib.idle_add(self.search.grab_focus)
+        GLib.idle_add(self.focus_search_once)
+
+    def focus_search_once(self):
+        self.search.grab_focus()
+        # Gtk.Widget.grab_focus() returns True on success.  Returning that value
+        # directly from an idle callback asks GLib to run it again forever.
+        return GLib.SOURCE_REMOVE
+
+    def active_changed(self, _window, _property):
+        if self.is_active():
+            self.was_active = True
+        elif self.was_active:
+            # Defer destruction until GTK has finished dispatching the focus
+            # event (including clicks into another application).
+            GLib.idle_add(self.close)
 
     def background_clicked(self, _gesture, _presses, x, y):
         widget = self.get_child().pick(x, y, Gtk.PickFlags.DEFAULT)
