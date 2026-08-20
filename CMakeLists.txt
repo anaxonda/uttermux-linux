@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(uttermux VERSION 0.3.0 LANGUAGES C CXX)
+project(uttermux VERSION 0.4.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CTest)
@@ -39,12 +39,17 @@ install(TARGETS sd_uttermux RUNTIME DESTINATION ${SPEECHD_MODULE_DIR})
 install(PROGRAMS daemon/uttermuxd.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME uttermuxd)
 install(PROGRAMS bridge/koreader_bridge.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME koreader-bridge)
 install(FILES systemd/uttermux.socket systemd/uttermux.service systemd/uttermux-koreader.service
+        systemd/uttermux-tray.service
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/user)
 install(PROGRAMS cli/uttermux DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(PROGRAMS ui/uttermux-panel.py DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME uttermux-panel)
+install(PROGRAMS ui/uttermux-app.py DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME uttermux-app)
+install(PROGRAMS ui/uttermux-tray.py DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME uttermux-tray)
 install(PROGRAMS cli/sherpa-voice DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME model-manager)
+install(FILES python/uttermux_profiles.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux)
 install(FILES catalog/catalog.toml DESTINATION ${CMAKE_INSTALL_DATADIR}/uttermux)
 install(FILES config/uttermux.conf DESTINATION ${CMAKE_INSTALL_DATADIR}/speech-dispatcher/conf/modules)
+install(FILES data/io.uttermux.App.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 
 if(BUILD_TESTING)
   add_executable(core_tests tests/core_tests.cpp)

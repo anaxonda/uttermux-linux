@@ -22,7 +22,10 @@
       "preview": {"enum": ["generated", "sample", "paid-generated", "unavailable"]}}, "additionalProperties": true}},
     "profiles": {"type": "array", "items": {"type": "object", "required": ["id", "name", "language", "engine", "modelVersion", "referenceFile", "createdAt", "localOnly"], "properties": {
       "id": {"type": "string"}, "name": {"type": "string"}, "language": {"type": "string"}, "engine": {"type": "string"}, "modelVersion": {"type": "string"},
-      "referenceFile": {"type": "string"}, "createdAt": {"type": "integer", "minimum": 0}, "localOnly": {"const": true}}, "additionalProperties": false}},
+      "referenceFile": {"type": "string"}, "createdAt": {"type": "integer", "minimum": 0}, "localOnly": {"const": true},
+      "voiceId": {"type": "string"}, "referenceSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+      "referenceText": {"type": "string"}, "artifactFile": {"type": "string"}, "available": {"type": "boolean"},
+      "directory": {"type": "string"}, "referencePath": {"type": "string"}, "artifactPath": {"type": "string"}}, "additionalProperties": false}},
     "runtime": {"type": "object", "properties": {"configuredDefault": {"type": "string"}, "routedVoice": {"type": "string"}, "activeVoice": {"type": "string"},
       "status": {"enum": ["idle", "warming", "speaking", "paused", "stopped", "error"]}, "language": {"type": "string"}, "client": {"type": "string"}, "fallbackReason": {"type": "string"}}, "additionalProperties": false}
   },

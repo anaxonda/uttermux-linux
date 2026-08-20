@@ -47,25 +47,44 @@ def request(kind, payload=b""):
 class Audio:
     def __init__(self, wav: bytes, duration: float):
         self.wav, self.duration, self.process, self.started_at = wav, duration, None, None
+        self.position, self.generation = 0.0, 0
+
+    def _remaining_wav(self):
+        source, output = BytesIO(self.wav), BytesIO()
+        with wave.open(source, "rb") as reader:
+            params = reader.getparams(); frame = min(reader.getnframes(), round(self.position * reader.getframerate()))
+            reader.setpos(frame); remaining = reader.readframes(reader.getnframes() - frame)
+        with wave.open(output, "wb") as writer:
+            writer.setparams(params); writer.writeframes(remaining)
+        return output.getvalue()
 
     def play(self):
-        self.stop()
+        if self.process and self.process.poll() is None:
+            return
+        if self.position >= self.duration - .05: self.position = 0.0
+        self.generation += 1; generation = self.generation
         self.process = subprocess.Popen(["paplay", "--stream-name=UtterMux KOReader"], stdin=subprocess.PIPE)
         self.started_at = time.monotonic()
-        threading.Thread(target=self._feed, daemon=True).start()
+        threading.Thread(target=self._feed, args=(generation, self._remaining_wav()), daemon=True).start()
 
-    def _feed(self):
-        try: self.process.communicate(self.wav)
+    def _feed(self, generation, content):
+        process = self.process
+        try: process.communicate(content)
         except (BrokenPipeError, OSError): pass
+        if generation == self.generation and self.started_at is not None:
+            self.position = min(self.duration, self.position + time.monotonic() - self.started_at)
+            self.started_at = None
 
     def stop(self):
-        if self.process and self.process.poll() is None: self.process.terminate()
+        if self.process and self.process.poll() is None:
+            if self.started_at is not None:
+                self.position = min(self.duration, self.position + time.monotonic() - self.started_at)
+            self.generation += 1; self.process.terminate()
         self.process, self.started_at = None, None
 
     def remaining(self):
-        if self.started_at is None: return False, float("inf")
-        remaining = max(0.0, self.duration - (time.monotonic() - self.started_at))
-        return True, remaining
+        position = self.position + (time.monotonic() - self.started_at if self.started_at is not None else 0)
+        return self.started_at is not None, max(0.0, self.duration - position)
 
 
 def synthesize(text, voice, speed):

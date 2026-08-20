@@ -6,6 +6,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest import mock
+import wave
 
 ROOT = Path(__file__).resolve().parents[1]
 loader = importlib.machinery.SourceFileLoader("sherpa_voice", str(ROOT / "cli/sherpa-voice"))
@@ -16,6 +17,9 @@ ut_loader = importlib.machinery.SourceFileLoader("uttermux_cli", str(ROOT / "cli
 ut_spec = importlib.util.spec_from_loader(ut_loader.name, ut_loader)
 ut = importlib.util.module_from_spec(ut_spec)
 ut_loader.exec_module(ut)
+profile_loader = importlib.machinery.SourceFileLoader("uttermux_profiles_test", str(ROOT / "python/uttermux_profiles.py"))
+profile_spec = importlib.util.spec_from_loader(profile_loader.name, profile_loader)
+profiles = importlib.util.module_from_spec(profile_spec); profile_loader.exec_module(profiles)
 
 
 class CliTests(unittest.TestCase):
@@ -45,6 +49,10 @@ class CliTests(unittest.TestCase):
             for item in catalog.values():
                 self.assertRegex(item["sha256"], r"^[0-9a-f]{64}$")
                 self.assertGreater(item["size"], 0)
+                for asset in item.get("assets", []):
+                    self.assertRegex(asset["sha256"], r"^[0-9a-f]{64}$")
+                    self.assertFalse(Path(asset["file"]).is_absolute())
+                    self.assertNotIn("..", Path(asset["file"]).parts)
         finally:
             if old is None: os.environ.pop("SHERPA_VOICE_CATALOG", None)
             else: os.environ["SHERPA_VOICE_CATALOG"] = old
@@ -113,6 +121,27 @@ class CliTests(unittest.TestCase):
                 manifest.unlink()
                 sv.install_model("test-model", True)
                 self.assertTrue(manifest.is_file())
+
+    def test_pocket_profile_round_trip_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root / "source.wav"
+            with wave.open(str(source), "wb") as output:
+                output.setnchannels(1); output.setsampwidth(2); output.setframerate(24000)
+                output.writeframes((b"\0\x20" * 24000 * 2))
+            with mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(root / "data")}), \
+                 mock.patch.object(profiles.subprocess, "run", wraps=profiles.subprocess.run):
+                item = profiles.create_local("pocket", "My Voice", "en_US", source)
+                self.assertTrue(Path(item["referencePath"]).is_file())
+                bundle = profiles.export_profile(item["id"], root / "voice")
+                profiles.delete_profile(item["id"])
+                imported = profiles.import_profile(bundle)
+                self.assertEqual(imported["name"], "My Voice")
+                self.assertEqual(imported["language"], "en-US")
+                self.assertNotEqual(imported["id"], item["id"])
+
+    def test_zipvoice_requires_exact_transcript(self):
+        with self.assertRaisesRegex(ValueError, "exact transcript"):
+            profiles.create_local("zipvoice", "Voice", "en-US", Path("missing.wav"))
 
 
 if __name__ == "__main__":

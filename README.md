@@ -20,9 +20,10 @@ Firefox / Zotero / spd-say / selection shortcut
                       |
                  uttermuxd
              /          |          \
- sherpa-onnx local   Microsoft Edge   ElevenLabs
- Kokoro/Kitten/      online voices    subscription
- Piper/Inflect
+ sherpa-onnx local   Microsoft Edge   ElevenLabs / xAI
+ Kokoro/Kitten/      online voices    subscriptions
+ Piper/Inflect/
+ Matcha/Supertonic/Pocket
 ```
 
 The module reports `END` only after it has submitted all audio for that client
@@ -39,7 +40,7 @@ Arch dependencies:
 ```sh
 sudo pacman -S --needed speech-dispatcher libspeechd rubberband \
   onnxruntime-cpu cmake ninja gcc git pkgconf python curl ffmpeg \
-  python-numpy python-aiohttp python-certifi
+  python-gobject gtk4 python-numpy python-aiohttp python-certifi
 ```
 
 Build sherpa-onnx **1.13.6 or newer** with its TTS C API, then UtterMux:
@@ -62,6 +63,10 @@ the new module is verified, old `sd_sherpa` files can be removed separately.
 ```sh
 uttermux setup
 uttermux doctor
+uttermux catalog --json
+uttermux status --json
+uttermux profiles --json
+uttermux settings-schema --json
 uttermux voices
 uttermux voices --language fr --provider elevenlabs
 uttermux discover --provider elevenlabs --language fr --search narrator
@@ -80,14 +85,17 @@ uttermux model install vits-inflect-en-nano-v2
 Bind `uttermux speak-selection` to a desktop shortcut. It uses `wl-paste`,
 `xclip`, or `xsel`, whichever is available.
 
-`uttermux-panel` provides the optional single-click Waybar control panel. It
-has one searchable view with language, provider, and model filters, plus voice
-selection, per-voice preview, selected-text playback, and stop actions. Searches combine
-installed voices with provider catalogs: all Edge locales are immediately
-usable, ElevenLabs Voice Library entries can be added with one click, and
-downloadable local catalog voices can be installed from the same list. When
-`gtk4-layer-shell` is used through Python GI, preload
-`/usr/lib/libgtk4-layer-shell.so` so the panel anchors below Waybar.
+`uttermux-app` is the normal GTK4 management window. Its Voices page has
+independent searches for voice, language, service/runtime, and model, plus
+offline/online, readiness, performance, size, and RAM controls. Create manages
+local and ElevenLabs clones; Settings keeps provider credentials and advanced
+controls out of the voice browser. Filters persist across window closes.
+
+`uttermux-tray` is a session StatusNotifierItem. A normal click opens or focuses
+the application; its menu also reads the current selection, stops speech, or
+quits only the tray process. `uttermux setup` enables its user service. Remove
+the old `custom/tts` module from Waybar and retain Waybar's standard `tray`
+module.
 
 Enable Edge for selected locales:
 
@@ -96,10 +104,11 @@ uttermux edge-locales en-US en-GB
 uttermux provider enable edge
 ```
 
-Configure ElevenLabs without placing the API key in the main config:
+Configure ElevenLabs without placing the API key in the main config or process
+arguments (the GTK Settings page uses the same stdin command):
 
 ```sh
-uttermux elevenlabs-key 'YOUR_API_KEY'
+printf '%s\n' 'YOUR_API_KEY' | uttermux credential-set elevenlabs
 uttermux elevenlabs-voice VOICE_ID 'Display Name' en-US
 uttermux provider enable elevenlabs
 ```
@@ -123,6 +132,60 @@ Grok voices are multilingual and use the provider's `language=auto` mode by
 default, including language changes within one request. Set
 `automatic_language = false` under `[providers.grok]` to send the language
 chosen by UtterMux routing instead.
+
+## Voice cloning
+
+Cloned voices are catalog voices: they can become the global default, appear in
+Firefox and Zotero through Speech Dispatcher, participate in language routes,
+and are available to the selection shortcut and KOReader bridge.
+
+```sh
+# Pocket: reference audio only (English, one to ten useful seconds)
+uttermux profile-create pocket --name 'My reader' --language en-US \
+  --audio reference.wav
+
+# ZipVoice: reference audio plus its exact transcript (English or Chinese)
+uttermux profile-create zipvoice --name 'My bilingual reader' --language en-US \
+  --audio reference.wav --transcript 'The exact words spoken in the recording.'
+
+uttermux profile-export PROFILE_ID my-reader.uttermux-voice
+uttermux profile-import my-reader.uttermux-voice
+uttermux profile-rename PROFILE_ID 'New name'
+uttermux profile-delete PROFILE_ID
+
+# ElevenLabs Instant Voice Clone; repeat --audio for multiple samples
+uttermux elevenlabs-clone --name 'My cloud voice' --language en-US \
+  --audio sample-one.wav --audio sample-two.wav --confirm-rights
+```
+
+Local references are normalized to 24 kHz mono PCM, stored beneath
+`~/.local/share/uttermux/voice-profiles`, and protected with user-only
+permissions. Pocket bundles contain the reference WAV; ZipVoice bundles contain
+the WAV and transcript. ElevenLabs clones remain attached to the configured
+account and cannot be exported as local model data. Only clone voices for which
+you have the necessary rights and consent.
+
+## Model support
+
+| Runtime | Location | Desktop status | Cloning | Notes |
+| --- | --- | --- | --- | --- |
+| Piper/VITS | Local | Supported | No | Fast baseline; catalog expansion is ongoing |
+| Inflect Nano | Local | Supported | No | Smallest supported English option |
+| Kitten Nano INT8 | Local | Supported | No | Tiny English model, eight speakers |
+| Kokoro 82M | Local | Supported | No | Multilingual model; current catalog exposes a curated set |
+| Matcha | Local | Downloadable | No | Separate Vocos asset is verified during install |
+| Supertonic 3 INT8 | Local | Downloadable | No | Ten styles, multilingual |
+| Pocket INT8 | Local | Downloadable | Yes | Reference-conditioned; four verified presets included with the download |
+| ZipVoice Distill INT8 | Local | Downloadable | Yes | English/Chinese; exact reference transcript required |
+| Qwen3-TTS | Local | Planned companion | Yes | Kept out of the core package because of model/runtime size |
+| Edge | Online | Supported | No | Unofficial consumer endpoint; may change upstream |
+| ElevenLabs | Online | Supported | Yes (IVC) | Requires API key and Voices write permission |
+| xAI/Grok | Online | Supported | Provider-managed | Automatic multilingual mode available |
+| Azure, Google, AWS, OpenAI, Deepgram, Cartesia, PlayHT, Resemble | Online | Compatibility roadmap | Varies | Not advertised as working until end-to-end credentials tests pass |
+
+MOSS is intentionally excluded. Audio8, Chatterbox, NeuTTS, local Qwen, and
+other larger runtimes remain benchmark candidates rather than nonfunctional
+rows in the application.
 
 ## Configuration
 

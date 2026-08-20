@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=UtterMux
+Comment=Manage local and online text-to-speech voices
+Exec=uttermux-app
+Icon=audio-speakers
+Categories=AudioVideo;Audio;Accessibility;Settings;
+Keywords=TTS;Speech;Voice;Read Aloud;
+StartupNotify=true
+DBusActivatable=false

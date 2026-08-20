@@ -73,6 +73,10 @@ def render_manifest(item: dict, root: Path) -> str:
     for voice in item.get("voices", []):
         lines += ["", "[[voice]]", f"id = {q(voice['id'])}", f"name = {q(voice['name'])}",
                   f"language = {q(voice['language'])}", f"speaker_id = {int(voice.get('speaker_id', 0))}"]
+        if voice.get("reference_file"):
+            lines.append(f"reference_file = {q(voice['reference_file'])}")
+        if voice.get("reference_text"):
+            lines.append(f"reference_text = {q(voice['reference_text'])}")
     return "\n".join(lines) + "\n"
 
 
@@ -162,6 +166,18 @@ def install_model(model_id: str, no_restart: bool = False) -> None:
         for relative in item["files"].values():
             if not (source / relative).exists():
                 raise RuntimeError(f"archive lacks required file: {relative}")
+        for asset in item.get("assets", []):
+            relative = Path(asset["file"])
+            if relative.is_absolute() or ".." in relative.parts:
+                raise RuntimeError(f"unsafe model asset path: {relative}")
+            target = source / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["curl", "--fail", "--location", "--retry", "3", "--continue-at", "-",
+                            "--output", str(target), asset["url"]], check=True)
+            actual_asset = sha256(target)
+            if actual_asset != asset["sha256"]:
+                raise RuntimeError(f"SHA-256 mismatch for {model_id}/{relative}: "
+                                   f"expected {asset['sha256']}, got {actual_asset}")
         if source == temp:
             os.replace(temp, final)
         else:

@@ -70,3 +70,95 @@ size = 22429639
 license = "Apache-2.0"
 files = { model = "model.onnx", tokens = "tokens.txt", data_dir = "espeak-ng-data" }
 voices = [{ id = "default", name = "Inflect Nano", language = "en-US", speaker_id = 0 }]
+
+[[model]]
+id = "matcha-icefall-en_US-ljspeech"
+engine = "matcha"
+family = "Matcha"
+description = "Matcha flow-matching English voice with Vocos vocoder"
+url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/matcha-icefall-en_US-ljspeech.tar.bz2"
+sha256 = "ea75702da7456a8b1874728278a835220dc8a26f4e8bd93c83bf53dc27679845"
+size = 80740352
+estimated_ram_mb = 320
+quantization = "FP32"
+performance_class = "balanced"
+license = "MIT"
+source_url = "https://github.com/shivammehta25/Matcha-TTS"
+files = { acoustic_model = "model-steps-3.onnx", vocoder = "vocos-22khz-univ.onnx", tokens = "tokens.txt", data_dir = "espeak-ng-data", lexicon = "lexicon.txt" }
+assets = [{ file = "vocos-22khz-univ.onnx", url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos-22khz-univ.onnx", sha256 = "0574a135aa1db2de6e181050db2ec528496cacd4a4701fc5d7faf9f9804c0081" }]
+voices = [{ id = "ljspeech", name = "LJSpeech Matcha", language = "en-US", speaker_id = 0 }]
+
+[[model]]
+id = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11"
+engine = "supertonic"
+family = "Supertonic"
+description = "Supertonic 3 INT8 multilingual TTS with ten voice styles"
+url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2"
+sha256 = "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427"
+size = 135266304
+estimated_ram_mb = 420
+quantization = "INT8"
+performance_class = "balanced"
+license = "OpenRAIL"
+source_url = "https://github.com/supertone-inc/supertonic"
+capabilities = ["multilingual", "streaming"]
+files = { duration_predictor = "duration_predictor.int8.onnx", text_encoder = "text_encoder.int8.onnx", vector_estimator = "vector_estimator.int8.onnx", vocoder = "vocoder.int8.onnx", tts_json = "tts.json", unicode_indexer = "unicode_indexer.bin", voice_style = "voice.bin" }
+voices = [
+  { id = "style-1", name = "Supertonic Style 1", language = "en-US", speaker_id = 0 },
+  { id = "style-2", name = "Supertonic Style 2", language = "en-US", speaker_id = 1 },
+  { id = "style-3", name = "Supertonic Style 3", language = "en-US", speaker_id = 2 },
+  { id = "style-4", name = "Supertonic Style 4", language = "en-US", speaker_id = 3 },
+  { id = "style-5", name = "Supertonic Style 5", language = "en-US", speaker_id = 4 },
+  { id = "style-6", name = "Supertonic Style 6", language = "en-US", speaker_id = 5 },
+  { id = "style-7", name = "Supertonic Style 7", language = "en-US", speaker_id = 6 },
+  { id = "style-8", name = "Supertonic Style 8", language = "en-US", speaker_id = 7 },
+  { id = "style-9", name = "Supertonic Style 9", language = "en-US", speaker_id = 8 },
+  { id = "style-10", name = "Supertonic Style 10", language = "en-US", speaker_id = 9 }
+]
+
+[[model]]
+id = "sherpa-onnx-pocket-tts-int8-2026-01-26"
+engine = "pocket"
+family = "Pocket"
+description = "Pocket TTS INT8 CPU model with reference-conditioned voice cloning"
+url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2"
+sha256 = "2f3b88823cbbb9bf0b2477ec8ae7b3fec417b3a87b6bb5f256dba66f2ad967cb"
+size = 184549376
+estimated_ram_mb = 420
+quantization = "INT8"
+performance_class = "balanced"
+license = "Apache-2.0; reference recordings have their own terms"
+source_url = "https://github.com/kyutai-labs/pocket-tts"
+capabilities = ["voice-cloning", "streaming"]
+files = { lm_flow = "lm_flow.int8.onnx", lm_main = "lm_main.int8.onnx", encoder = "encoder.onnx", decoder = "decoder.int8.onnx", text_conditioner = "text_conditioner.onnx", vocab_json = "vocab.json", token_scores_json = "token_scores.json" }
+assets = [
+  { file = "presets/alba-casual.wav", url = "https://huggingface.co/kyutai/tts-voices/resolve/main/alba-mackenna/casual.wav", sha256 = "46264e83cb99115c3d210260e029117566d9c64f20266d10daa78107759ede3e" },
+  { file = "presets/alba-announcer.wav", url = "https://huggingface.co/kyutai/tts-voices/resolve/main/alba-mackenna/announcer.wav", sha256 = "e8b55193435db043833dda62fb759ee2779ace195811340ee8d28c7c4a4ccc24" },
+  { file = "presets/mary.wav", url = "https://huggingface.co/kyutai/tts-voices/resolve/main/vctk/p333_023_enhanced.wav", sha256 = "a35b0468382218e9f37a9a7494d1e4b74deaf18d7ced22265b4e325bb55c183f" },
+  { file = "presets/michael.wav", url = "https://huggingface.co/kyutai/tts-voices/resolve/main/vctk/p360_023_enhanced.wav", sha256 = "b6743e9195e5e3fd34fe9d1633ae93f7ffab787b249e45f6467d7d6f7a6ee6ad" }
+]
+voices = [
+  { id = "alba-casual", name = "Alba Casual", language = "en-US", speaker_id = 0, reference_file = "presets/alba-casual.wav", gender = "female" },
+  { id = "alba-announcer", name = "Alba Announcer", language = "en-US", speaker_id = 0, reference_file = "presets/alba-announcer.wav", gender = "female" },
+  { id = "mary", name = "Mary", language = "en-US", speaker_id = 0, reference_file = "presets/mary.wav", gender = "female" },
+  { id = "michael", name = "Michael", language = "en-US", speaker_id = 0, reference_file = "presets/michael.wav", gender = "male" }
+]
+
+[[model]]
+id = "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"
+engine = "zipvoice"
+family = "ZipVoice"
+description = "ZipVoice Distill INT8 English/Chinese zero-shot voice cloning"
+url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2"
+sha256 = "77219c8b40f4ee8d73a7f902305ff6c1128ef9b54461c41b4ca6ed890b6c2803"
+size = 163320894
+estimated_ram_mb = 650
+quantization = "INT8"
+performance_class = "heavy"
+license = "Apache-2.0"
+source_url = "https://github.com/k2-fsa/ZipVoice"
+capabilities = ["voice-cloning", "streaming"]
+languages = ["en-US", "zh-CN"]
+files = { tokens = "tokens.txt", encoder = "encoder.int8.onnx", decoder = "decoder.int8.onnx", vocoder = "vocos_24khz.onnx", data_dir = "espeak-ng-data", lexicon = "lexicon.txt" }
+assets = [{ file = "vocos_24khz.onnx", url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx", sha256 = "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0" }]
+voices = []

@@ -1,0 +1,13 @@
+[Unit]
+Description=UtterMux desktop tray
+After=graphical-session.target uttermux.socket
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/uttermux-tray
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -49,6 +49,9 @@ class ProtocolTests(unittest.TestCase):
             "edge/denise": ("edge/denise", "Denise", "fr-FR", "edge", "Edge", ("fr-FR",), False),
             "local/lessac": ("local/lessac", "Lessac", "en-US", "local", "piper", ("en-US",), True),
         }
+        broker.runtime_lock = threading.Lock()
+        broker.runtime = {"status": "idle", "activeVoice": "", "routedVoice": "",
+                          "language": "", "fallbackReason": ""}
         return broker
 
     def test_declared_language_wins_and_preserves_compatible_persona(self):
@@ -129,6 +132,18 @@ class ProtocolTests(unittest.TestCase):
              mock.patch.dict("os.environ", {}, clear=False):
             bridge.synthesize("hello", "elevenlabs/old-voice", 1)
         self.assertEqual(captured[0][0], b"")
+
+    def test_koreader_play_is_idempotent_and_stop_preserves_position(self):
+        bridge = load_bridge(); audio = bridge.Audio(b"RIFF-invalid-for-mocked-feed", 10)
+        process = mock.MagicMock(); process.poll.return_value = None
+        with mock.patch.object(bridge.subprocess, "Popen", return_value=process), \
+             mock.patch.object(bridge.threading, "Thread") as thread, \
+             mock.patch.object(audio, "_remaining_wav", return_value=b"wav"), \
+             mock.patch.object(bridge.time, "monotonic", side_effect=[100.0, 102.5]):
+            audio.play(); audio.play(); audio.stop()
+        self.assertEqual(thread.call_count, 1)
+        self.assertAlmostEqual(audio.position, 2.5)
+        process.terminate.assert_called_once()
 
 
 if __name__ == "__main__": unittest.main()

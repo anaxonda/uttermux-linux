@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from array import array
 from collections import OrderedDict
 import ctypes
 import json
@@ -24,12 +25,22 @@ import tomllib
 from typing import Callable
 import urllib.error
 import urllib.request
+import wave
+
+for _common in (Path(__file__).resolve().parents[1] / "python", Path("/usr/lib/uttermux"),
+                Path("/usr/local/lib/uttermux")):
+    if (_common / "uttermux_profiles.py").is_file() and str(_common) not in sys.path:
+        sys.path.insert(0, str(_common))
+try:
+    import uttermux_profiles
+except ImportError:
+    uttermux_profiles = None
 
 MAGIC = 0x58544D55
 VERSION = 1
 HEADER = struct.Struct("<IHHQI")
 MAX_PACKET = 64 * 1024
-HELLO, LIST_VOICES, VOICE, SYNTHESIZE, AUDIO_START, AUDIO, DONE, CANCEL, ERROR, HEALTH = range(1, 11)
+HELLO, LIST_VOICES, VOICE, SYNTHESIZE, AUDIO_START, AUDIO, DONE, CANCEL, ERROR, HEALTH, STATUS, STATE = range(1, 13)
 
 ELEVEN_FLASH_LANGUAGES = (
     "ar", "bg", "cs", "da", "de", "el", "en", "es", "fi", "fil", "fr", "hi", "hr",
@@ -178,6 +189,21 @@ class SherpaEngine:
             cfg.model.vits = VitsConfig(path("model"), path("lexicon"), path("tokens"), path("data_dir"),
                 float(model.get("noise_scale", .667)), float(model.get("noise_scale_w", .8)),
                 float(model.get("length_scale", 1)), b(""))
+        elif engine == "matcha":
+            cfg.model.matcha = MatchaConfig(path("acoustic_model"), path("vocoder"), path("lexicon"),
+                path("tokens"), path("data_dir"), float(model.get("noise_scale", .667)),
+                float(model.get("length_scale", 1)), b(""))
+        elif engine == "zipvoice":
+            cfg.model.zipvoice = ZipvoiceConfig(path("tokens"), path("encoder"), path("decoder"),
+                path("vocoder"), path("data_dir"), path("lexicon"), 0, 0, 0, 0)
+        elif engine == "pocket":
+            cfg.model.pocket = PocketConfig(path("lm_flow"), path("lm_main"), path("encoder"),
+                path("decoder"), path("text_conditioner"), path("vocab_json"),
+                path("token_scores_json"), int(model.get("voice_embedding_cache_capacity", 50)))
+        elif engine == "supertonic":
+            cfg.model.supertonic = SupertonicConfig(path("duration_predictor"), path("text_encoder"),
+                path("vector_estimator"), path("vocoder"), path("tts_json"), path("unicode_indexer"),
+                path("voice_style"))
         else:
             raise ValueError(f"unsupported sherpa engine: {engine}")
         self.handle = api.SherpaOnnxCreateOfflineTts(ctypes.byref(cfg))
@@ -185,7 +211,8 @@ class SherpaEngine:
             raise RuntimeError(f"sherpa rejected model {model['id']}")
         self.sample_rate = api.SherpaOnnxOfflineTtsSampleRate(self.handle)
 
-    def synthesize(self, text: str, speaker: int, speed: float, emit: Callable[[bytes], None], cancelled: threading.Event) -> None:
+    def synthesize(self, text: str, speaker: int, speed: float, emit: Callable[[bytes], None],
+                   cancelled: threading.Event, profile: dict | None = None) -> None:
         started = False
 
         @PROGRESS
@@ -203,6 +230,28 @@ class SherpaEngine:
             return 0 if cancelled.is_set() else 1
 
         generation = GenerationConfig(silence_scale=.2, speed=speed, sid=speaker)
+        reference_samples = None
+        reference_text = None
+        extra = None
+        if profile:
+            with wave.open(profile["referencePath"], "rb") as source:
+                if source.getnchannels() != 1 or source.getsampwidth() != 2:
+                    raise RuntimeError("clone reference must be mono PCM16 WAV")
+                pcm = array("h"); pcm.frombytes(source.readframes(source.getnframes()))
+                reference_samples = (ctypes.c_float * len(pcm))(*(sample / 32768.0 for sample in pcm))
+                generation.reference_audio = reference_samples
+                generation.reference_audio_len = len(pcm)
+                generation.reference_sample_rate = source.getframerate()
+            if profile.get("referenceText"):
+                reference_text = profile["referenceText"].encode("utf-8")
+                generation.reference_text = reference_text
+            if profile.get("engine") == "pocket":
+                generation.num_steps = 3
+                extra = b'{"max_reference_audio_len":10.0,"chunk_size":4}'
+            elif profile.get("engine") == "zipvoice":
+                generation.num_steps = 4
+                extra = b'{"min_char_in_sentence":10}'
+            generation.extra = extra
         with self.lock:
             audio = self.api.SherpaOnnxOfflineTtsGenerateWithConfig(
                 self.handle, text.encode("utf-8"), ctypes.byref(generation), callback, None)
@@ -453,6 +502,9 @@ class Broker:
         self.audio_cache_bytes = 0
         self.audio_cache_limit = max(0, int(self.config.get("audio_cache_mb", 64))) * 1024 * 1024
         self.audio_cache_lock = threading.Lock()
+        self.runtime_lock = threading.Lock()
+        self.runtime = {"status": "idle", "activeVoice": "", "routedVoice": "",
+                        "language": "", "fallbackReason": ""}
         for model in self.models.values():
             for voice in model.get("voice", []):
                 voice_id = f"sherpa/{model['id']}/{voice['id']}"
@@ -462,6 +514,28 @@ class Broker:
                     voice.get("languages", model.get("languages", [native])))
                 self.voice_meta[voice_id] = (voice_id, f"{voice['name']} · Local", native,
                     "local", model["id"], capabilities, True)
+        self.profiles = {}
+        for voice_id, (model, voice) in self.voices.items():
+            if voice.get("reference_file"):
+                self.profiles[voice_id] = {
+                    "id": voice["id"], "voiceId": voice_id, "name": voice["name"],
+                    "language": normalize_language(voice["language"]), "engine": model["engine"],
+                    "modelVersion": model["id"],
+                    "referencePath": str(Path(model["root"]) / voice["reference_file"]),
+                    "referenceText": voice.get("reference_text", ""),
+                }
+        if uttermux_profiles:
+            for profile in uttermux_profiles.profiles():
+                model = self.models.get(profile.get("modelVersion", ""))
+                if not model or not profile.get("referencePath"):
+                    continue
+                voice_id = profile["voiceId"]
+                voice = {"id": f"custom-{profile['id']}", "name": profile["name"],
+                         "language": profile["language"], "speaker_id": 0}
+                self.voices[voice_id] = (model, voice)
+                self.profiles[voice_id] = profile
+                self.voice_meta[voice_id] = (voice_id, f"{profile['name']} · {profile['engine'].title()}",
+                    profile["language"], "local", model["id"], (profile["language"],), True)
         provider_config = self.config.get("providers", {})
         for provider_name, provider_type in (("edge", EdgeProvider), ("elevenlabs", ElevenLabsProvider),
                                              ("grok", GrokProvider)):
@@ -510,10 +584,10 @@ class Broker:
             engine.lock.acquire()
             return engine
 
-    def synthesize_local(self, model, voice, text, speed, emit, cancelled):
+    def synthesize_local(self, model, voice, text, speed, emit, cancelled, profile=None):
         engine = self.engine(model)
         try:
-            engine.synthesize(text, int(voice.get("speaker_id", 0)), speed, emit, cancelled)
+            engine.synthesize(text, int(voice.get("speaker_id", 0)), speed, emit, cancelled, profile)
         finally:
             engine.lock.release()
 
@@ -591,7 +665,8 @@ class Broker:
                           language: str, emit, cancelled):
         if voice_id in self.voices:
             model, voice = self.voices[voice_id]
-            self.synthesize_local(model, voice, text, speed, emit, cancelled)
+            self.synthesize_local(model, voice, text, speed, emit, cancelled,
+                                  self.profiles.get(voice_id))
             return
         if voice_id not in self.online_voices:
             raise ValueError(f"unknown voice: {voice_id}")
@@ -637,25 +712,41 @@ class Broker:
         language, candidates = self._route(voice_id, requested_language, text)
         if not candidates:
             raise RuntimeError(f"no route for language {language}")
+        with self.runtime_lock:
+            self.runtime.update(status="warming", activeVoice="", routedVoice=candidates[0],
+                                language=language, fallbackReason="")
         last_error = None
-        for candidate in candidates:
-            emitted = False
+        try:
+            for index, candidate in enumerate(candidates):
+                emitted = False
+                with self.runtime_lock:
+                    self.runtime.update(status="warming", activeVoice="", routedVoice=candidate,
+                        fallbackReason="" if index == 0 else str(last_error or "previous route unavailable"))
 
-            def tracked(raw: bytes):
-                nonlocal emitted
-                _magic, _version, kind, _rid, _size = HEADER.unpack_from(raw)
-                emitted = emitted or kind in (AUDIO_START, AUDIO)
-                emit(raw)
+                def tracked(raw: bytes):
+                    nonlocal emitted
+                    _magic, _version, kind, _rid, _size = HEADER.unpack_from(raw)
+                    emitted = emitted or kind in (AUDIO_START, AUDIO)
+                    if kind == AUDIO_START:
+                        with self.runtime_lock:
+                            self.runtime.update(status="speaking", activeVoice=candidate)
+                    emit(raw)
 
-            try:
-                self._synthesize_voice(candidate, text, speed, language, tracked, cancelled)
-                return
-            except Exception as error:
-                last_error = error
-                if emitted or cancelled.is_set():
-                    raise
-                print(f"uttermuxd: route {candidate} failed before audio: {error}", file=sys.stderr)
-        raise RuntimeError(f"all routes for {language} failed: {last_error}")
+                try:
+                    self._synthesize_voice(candidate, text, speed, language, tracked, cancelled)
+                    return
+                except Exception as error:
+                    last_error = error
+                    if emitted or cancelled.is_set(): raise
+                    print(f"uttermuxd: route {candidate} failed before audio: {error}", file=sys.stderr)
+            raise RuntimeError(f"all routes for {language} failed: {last_error}")
+        finally:
+            with self.runtime_lock:
+                self.runtime["status"] = "stopped" if cancelled.is_set() else "idle"
+                self.runtime["activeVoice"] = ""
+
+    def status(self) -> dict:
+        with self.runtime_lock: return dict(self.runtime)
 
 
 def client_loop(connection: socket.socket, broker: Broker) -> None:
@@ -680,6 +771,9 @@ def client_loop(connection: socket.socket, broker: Broker) -> None:
                 purpose = split_fields(payload)
                 for voice in broker.list_voices(management=bool(purpose and purpose[0] == "management")):
                     send(packet(VOICE, request_id, fields(*voice)))
+                send(packet(DONE, request_id))
+            elif kind == STATUS:
+                send(packet(STATE, request_id, json.dumps(broker.status()).encode("utf-8")))
                 send(packet(DONE, request_id))
             elif kind == CANCEL:
                 if request_id in jobs:

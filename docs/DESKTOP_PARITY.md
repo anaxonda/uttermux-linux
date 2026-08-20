@@ -17,10 +17,18 @@ synthesis. The required JSON commands are:
 | `uttermux profiles --json` | local clone profiles; reference paths are local-only |
 | `uttermux settings-schema --json` | provider fields and safe playback controls |
 
-The later GTK interface will mirror the Android information architecture:
-Voices for discovery/defaults, Create for clone-capable local engines, and
+The GTK interface mirrors the Android information architecture: Voices for
+discovery/defaults, Create for Pocket/ZipVoice/ElevenLabs clone workflows, and
 Settings for providers, routing, storage, advanced playback, and diagnostics.
-It must invoke broker/CLI operations and must not edit TOML directly.
+It invokes broker/CLI operations and does not edit TOML directly. A separate
+StatusNotifierItem opens the ordinary window; Waybar only needs its standard
+tray module.
+
+Local voice profiles can be exported as versioned `.uttermux-voice` bundles.
+The bundle is engine-specific: Pocket carries its normalized WAV, ZipVoice
+carries the WAV plus exact transcript, and future Qwen bundles carry a
+`.qvoice` artifact. Unsupported bundles may be retained by another platform,
+but they are not selectable until the matching runtime is installed.
 
 Incompatible contract changes require a new schema version. Additive optional
 fields do not. Each repository keeps a conformance fixture and validates it in

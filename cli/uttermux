@@ -20,9 +20,18 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+for _common in (Path(__file__).resolve().parents[1] / "python", Path("/usr/lib/uttermux"),
+                Path("/usr/local/lib/uttermux")):
+    if (_common / "uttermux_profiles.py").is_file() and str(_common) not in sys.path:
+        sys.path.insert(0, str(_common))
+try:
+    import uttermux_profiles
+except ImportError:
+    uttermux_profiles = None
+
 MAGIC, VERSION = 0x58544D55, 1
 HEADER = struct.Struct("<IHHQI")
-LIST_VOICES, VOICE, DONE, ERROR, HEALTH = 2, 3, 7, 9, 10
+LIST_VOICES, VOICE, DONE, ERROR, HEALTH, STATUS, STATE = 2, 3, 7, 9, 10, 11, 12
 
 
 def config_dir() -> Path:
@@ -164,6 +173,7 @@ def setup(_args):
     if begin not in current: atomic_write(speechd, current.rstrip() + "\n\n" + block + "\n")
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
     subprocess.run(["systemctl", "--user", "enable", "--now", "uttermux.socket"], check=True)
+    subprocess.run(["systemctl", "--user", "enable", "--now", "uttermux-tray.service"], check=False)
     restart()
     print("UtterMux configured as the default Speech Dispatcher module.")
 
@@ -179,6 +189,138 @@ def voice_records():
     for voice_id, name, native, provider, model, capabilities in voices():
         yield {"id": voice_id, "name": name, "native_language": native, "provider": provider,
                "model": model, "languages": [x for x in capabilities.split(",") if x] or [native]}
+
+
+def catalog_path() -> Path:
+    value = Path(os.environ.get("UTTERMUX_CATALOG", "/usr/share/uttermux/catalog.toml"))
+    return value if value.is_file() else Path(__file__).resolve().parents[1] / "catalog/catalog.toml"
+
+
+def local_catalog() -> list[dict]:
+    path = catalog_path()
+    if not path.is_file(): return []
+    with path.open("rb") as stream: return tomllib.load(stream).get("model", [])
+
+
+def profile_records() -> list[dict]:
+    return uttermux_profiles.profiles() if uttermux_profiles else []
+
+
+def cmd_catalog(_args):
+    ready = {item["id"]: item for item in voice_records()}
+    models, catalog_voices = [], []
+    for item in local_catalog():
+        languages = item.get("languages") or sorted({voice.get("language", "und") for voice in item.get("voices", [])})
+        installed = any(record["model"] == item["id"] and record["provider"] == "local"
+                        for record in ready.values())
+        models.append({
+            "id": item["id"], "providerId": "local", "library": item.get("family", item["engine"]),
+            "version": item.get("version", "1"), "engine": item["engine"], "location": "on-device",
+            "languages": languages, "capabilities": item.get("capabilities", []),
+            "status": "ready" if installed else "downloadable",
+            "downloadSizeMb": round(int(item.get("size", 0)) / 1024 / 1024),
+            "estimatedRamMb": int(item.get("estimated_ram_mb", 0)),
+            "quantization": item.get("quantization", ""),
+            "performanceClass": item.get("performance_class", "unknown"),
+            "license": item.get("license", ""), "sourceUrl": item.get("source_url", item.get("url", "")),
+        })
+        for voice in item.get("voices", []):
+            voice_id = f"sherpa/{item['id']}/{voice['id']}"
+            catalog_voices.append({"id": voice_id, "modelId": item["id"],
+                "speakerId": str(voice.get("speaker_id", 0)), "name": voice["name"],
+                "languages": voice.get("languages", [voice.get("language", "und")]),
+                "gender": voice.get("gender", ""), "preview": "generated" if voice_id in ready else
+                ("sample" if voice.get("preview_url") else "unavailable"),
+                "previewUrl": voice.get("preview_url", ""), "ready": voice_id in ready})
+    provider_names = {"local": ("Local models", False, "free"), "edge": ("Microsoft Edge", True, "free"),
+                      "elevenlabs": ("ElevenLabs", True, "subscription"), "grok": ("xAI", True, "metered")}
+    providers = [{"id": key, "name": values[0], "network": values[1], "cost": values[2],
+                  "enabled": key == "local" or bool(read_config().get("providers", {}).get(key, {}).get("enabled"))}
+                 for key, values in provider_names.items()]
+    local_ids = {voice["id"] for voice in catalog_voices}
+    for record in ready.values():
+        if record["id"] in local_ids: continue
+        if record["provider"] == "local" and any(model["id"] == record["model"] for model in models):
+            catalog_voices.append({"id": record["id"], "modelId": record["model"],
+                "speakerId": record["id"].split("/")[-1], "name": record["name"],
+                "languages": record["languages"], "preview": "generated", "ready": True,
+                "profile": record["id"] in {item.get("voiceId") for item in profile_records()}})
+            continue
+        model_id = f"{record['provider']}/{record['model']}"
+        if not any(model["id"] == model_id for model in models):
+            models.append({"id": model_id, "providerId": record["provider"], "library": record["model"],
+                "version": "service", "engine": record["provider"], "location": "cloud",
+                "languages": record["languages"], "capabilities": ["streaming"], "status": "ready",
+                "performanceClass": "cloud"})
+        catalog_voices.append({"id": record["id"], "modelId": model_id, "speakerId": record["id"].split("/")[-1],
+            "name": record["name"], "languages": record["languages"], "preview": "generated", "ready": True})
+    print(json.dumps({"schemaVersion": 1, "providers": providers, "models": models,
+                      "voices": catalog_voices, "profiles": profile_records()}, ensure_ascii=False, indent=2))
+
+
+def cmd_status(_args):
+    document = read_config(); default_id = document.get("default_voice", "")
+    available = {record["id"]: record for record in voice_records()}
+    runtime = {}
+    try:
+        for kind, payload in transact(STATUS):
+            if kind == STATE: runtime = json.loads(payload)
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError): pass
+    print(json.dumps({"schemaVersion": 1, "configuredDefault": default_id,
+        "routedVoice": runtime.get("routedVoice") or (default_id if default_id in available else document.get("fallback_voice", "")),
+        "activeVoice": runtime.get("activeVoice", ""), "status": runtime.get("status", "idle"),
+        "language": runtime.get("language") or document.get("routing", {}).get("default_language", "en-US"),
+        "fallbackReason": runtime.get("fallbackReason", ""),
+        "socket": str(socket_path()), "brokerAvailable": socket_path().exists(),
+        "profileCount": len(profile_records())}, ensure_ascii=False, indent=2))
+
+
+def cmd_profiles(_args):
+    print(json.dumps(profile_records(), ensure_ascii=False, indent=2))
+
+
+def require_profile_store():
+    if not uttermux_profiles: raise RuntimeError("UtterMux profile support is not installed")
+
+
+def cmd_profile_create(args):
+    require_profile_store()
+    item = uttermux_profiles.create_local(args.engine, args.name, args.language,
+                                           Path(args.audio), args.transcript or "")
+    restart(); print(json.dumps(item, ensure_ascii=False, indent=2))
+
+
+def cmd_profile_import(args):
+    require_profile_store(); item = uttermux_profiles.import_profile(Path(args.bundle))
+    restart(); print(json.dumps(item, ensure_ascii=False, indent=2))
+
+
+def cmd_profile_export(args):
+    require_profile_store(); print(uttermux_profiles.export_profile(args.profile, Path(args.output)))
+
+
+def cmd_profile_delete(args):
+    require_profile_store(); uttermux_profiles.delete_profile(args.profile); restart()
+
+
+def cmd_profile_rename(args):
+    require_profile_store(); print(json.dumps(uttermux_profiles.rename_profile(args.profile, args.name),
+                                               ensure_ascii=False, indent=2)); restart()
+
+
+def cmd_settings_schema(_args):
+    root = config_dir() / "credentials"
+    providers = [
+        {"id": "edge", "name": "Microsoft Edge", "fields": []},
+        {"id": "elevenlabs", "name": "ElevenLabs", "fields": [
+            {"id": "apiKey", "type": "secret-file", "path": str(root / "elevenlabs-api-key"), "required": True}]},
+        {"id": "grok", "name": "xAI / Grok", "fields": [
+            {"id": "apiKey", "type": "secret-file", "path": str(root / "grok-key"), "required": True}]},
+    ]
+    print(json.dumps({"schemaVersion": 1, "providers": providers, "playback": {
+        "maxLoadedModels": {"type": "integer", "minimum": 1, "maximum": 8, "default": 2},
+        "audioCacheMb": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64},
+        "autoDetectLanguage": {"type": "boolean", "default": True}}}, indent=2))
 
 
 def cmd_voices(args):
@@ -296,6 +438,58 @@ def cmd_key(args):
     path = config_dir() / "credentials/elevenlabs-api-key"
     atomic_write(path, args.key.strip() + "\n")
     print(f"Stored ElevenLabs API key in {path}")
+
+
+def cmd_credential_set(args):
+    filenames = {"elevenlabs": "elevenlabs-api-key", "grok": "grok-key"}
+    secret = sys.stdin.readline().strip()
+    if not secret: raise RuntimeError("credential is empty")
+    path = config_dir() / "credentials" / filenames[args.provider]
+    atomic_write(path, secret + "\n")
+    print(f"Stored {args.provider} credential in {path}")
+
+
+def cmd_eleven_clone(args):
+    if not args.confirm_rights:
+        raise RuntimeError("voice cloning requires --confirm-rights")
+    samples = [Path(value) for value in args.audio]
+    if not samples or any(not path.is_file() for path in samples):
+        raise RuntimeError("all ElevenLabs reference recordings must be readable files")
+    boundary = f"----UtterMux{int(time.time() * 1000)}"
+    body = bytearray()
+
+    def field(name: str, value: bytes, filename: str = "", content_type: str = "text/plain"):
+        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"".encode())
+        if filename:
+            filename = "".join(character for character in filename if character not in {'"', '\r', '\n'})
+            body.extend(f"; filename=\"{filename}\"".encode())
+        body.extend(f"\r\nContent-Type: {content_type}\r\n\r\n".encode()); body.extend(value); body.extend(b"\r\n")
+
+    field("name", args.name.encode("utf-8"))
+    field("description", (args.description or "Created by UtterMux").encode("utf-8"))
+    labels = json.dumps({"language": args.language})
+    field("labels", labels.encode("utf-8"), content_type="application/json")
+    for sample in samples:
+        field("files", sample.read_bytes(), sample.name, "application/octet-stream")
+    body.extend(f"--{boundary}--\r\n".encode())
+    document = read_config()
+    request = urllib.request.Request("https://api.elevenlabs.io/v1/voices/add", data=bytes(body), method="POST",
+        headers={"xi-api-key": elevenlabs_key(document), "Content-Type": f"multipart/form-data; boundary={boundary}",
+                 "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response: result = json.load(response)
+    except urllib.error.HTTPError as error:
+        detail = error.read(2048).decode(errors="replace")
+        if error.code in (401, 403): detail += " (the API key needs Voices write permission)"
+        raise RuntimeError(f"ElevenLabs clone HTTP {error.code}: {detail}") from None
+    external_id = result["voice_id"]
+    cfg = document.setdefault("providers", {}).setdefault("elevenlabs", {})
+    entries = cfg.setdefault("voices", [])
+    entries.append({"id": external_id, "name": args.name, "language": args.language})
+    atomic_write(config_path(), render_config(document)); restart()
+    print(json.dumps({"id": f"elevenlabs/{external_id}", "name": args.name,
+                      "language": args.language, "remote": True,
+                      "requiresVerification": bool(result.get("requires_verification"))}, indent=2))
 
 
 def cmd_provider(args):
@@ -465,6 +659,9 @@ def main():
     parser = argparse.ArgumentParser(prog="uttermux")
     sub = parser.add_subparsers(required=True)
     sub.add_parser("setup").set_defaults(func=setup)
+    for name, func in (("catalog", cmd_catalog), ("status", cmd_status),
+                       ("profiles", cmd_profiles), ("settings-schema", cmd_settings_schema)):
+        p = sub.add_parser(name); p.add_argument("--json", action="store_true"); p.set_defaults(func=func)
     p = sub.add_parser("voices"); p.add_argument("--language"); p.add_argument("--provider")
     p.add_argument("--model"); p.add_argument("--search"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_voices)
     p = sub.add_parser("default"); p.add_argument("voice"); p.add_argument("--language"); p.set_defaults(func=cmd_default)
@@ -479,8 +676,20 @@ def main():
     p = sub.add_parser("provider-default"); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
     p = sub.add_parser("edge-locales"); p.add_argument("locales", nargs="+"); p.set_defaults(func=cmd_edge_locales)
     p = sub.add_parser("elevenlabs-key"); p.add_argument("key"); p.set_defaults(func=cmd_key)
+    p = sub.add_parser("credential-set"); p.add_argument("provider", choices=("elevenlabs", "grok")); p.set_defaults(func=cmd_credential_set)
+    p = sub.add_parser("elevenlabs-clone"); p.add_argument("--name", required=True)
+    p.add_argument("--language", default="en-US"); p.add_argument("--description")
+    p.add_argument("--audio", action="append", required=True); p.add_argument("--confirm-rights", action="store_true")
+    p.set_defaults(func=cmd_eleven_clone)
     p = sub.add_parser("elevenlabs-voice"); p.add_argument("id"); p.add_argument("name"); p.add_argument("language", nargs="?", default="en-US"); p.set_defaults(func=cmd_eleven_voice)
     p = sub.add_parser("model"); p.add_argument("action", choices=("list", "install", "remove")); p.add_argument("model_id", nargs="?"); p.set_defaults(func=cmd_model)
+    p = sub.add_parser("profile-create"); p.add_argument("engine", choices=("pocket", "zipvoice"))
+    p.add_argument("--name", required=True); p.add_argument("--language", required=True)
+    p.add_argument("--audio", required=True); p.add_argument("--transcript"); p.set_defaults(func=cmd_profile_create)
+    p = sub.add_parser("profile-import"); p.add_argument("bundle"); p.set_defaults(func=cmd_profile_import)
+    p = sub.add_parser("profile-export"); p.add_argument("profile"); p.add_argument("output"); p.set_defaults(func=cmd_profile_export)
+    p = sub.add_parser("profile-delete"); p.add_argument("profile"); p.set_defaults(func=cmd_profile_delete)
+    p = sub.add_parser("profile-rename"); p.add_argument("profile"); p.add_argument("name"); p.set_defaults(func=cmd_profile_rename)
     sub.add_parser("doctor").set_defaults(func=doctor)
     args = parser.parse_args()
     try: args.func(args); return 0
