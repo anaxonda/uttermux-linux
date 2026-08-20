@@ -5,7 +5,7 @@ After=uttermux.socket
 
 [Service]
 Type=simple
-ExecStart=/usr/lib/uttermux/uttermuxd
+ExecStart=@CMAKE_INSTALL_FULL_LIBDIR@/uttermux/uttermuxd
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=yes

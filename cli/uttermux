@@ -22,6 +22,7 @@ import urllib.parse
 import urllib.request
 
 for _common in reversed((Path(__file__).resolve().parents[1] / "python", Path("/usr/lib/uttermux"),
+                         Path("/usr/lib64/uttermux"), Path("/usr/libexec/uttermux"),
                          Path("/usr/local/lib/uttermux"))):
     if (_common / "uttermux_profiles.py").is_file() and str(_common) not in sys.path:
         sys.path.insert(0, str(_common))
@@ -31,6 +32,7 @@ except ImportError:
     uttermux_profiles = None
 
 MAGIC, VERSION = 0x58544D55, 1
+APP_VERSION = "0.4.0"
 HEADER = struct.Struct("<IHHQI")
 HELLO, LIST_VOICES, VOICE, SPEAK, AUDIO_START, AUDIO, DONE, STOP, ERROR, HEALTH, STATUS, STATE = range(1, 13)
 
@@ -41,6 +43,26 @@ def config_dir() -> Path:
 
 def config_path() -> Path:
     return config_dir() / "config.toml"
+
+
+def install_prefix() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def installed_data_file(relative: str) -> Path:
+    candidates = (install_prefix() / "share/uttermux" / relative,
+                  Path("/usr/share/uttermux") / relative,
+                  Path("/usr/local/share/uttermux") / relative)
+    return next((path for path in candidates if path.is_file()), candidates[0])
+
+
+def installed_helper(name: str) -> Path:
+    candidates = (install_prefix() / "lib/uttermux" / name,
+                  install_prefix() / "lib64/uttermux" / name,
+                  install_prefix() / "libexec/uttermux" / name,
+                  Path("/usr/lib/uttermux") / name, Path("/usr/lib64/uttermux") / name,
+                  Path("/usr/libexec/uttermux") / name)
+    return next((path for path in candidates if path.exists()), candidates[0])
 
 
 def socket_path() -> Path:
@@ -208,8 +230,12 @@ def voice_records():
 
 
 def catalog_path() -> Path:
-    value = Path(os.environ.get("UTTERMUX_CATALOG", "/usr/share/uttermux/catalog.toml"))
-    return value if value.is_file() else Path(__file__).resolve().parents[1] / "catalog/catalog.toml"
+    override = os.environ.get("UTTERMUX_CATALOG")
+    if override: return Path(override)
+    source = Path(__file__).resolve().parents[1] / "catalog/catalog.toml"
+    if source.is_file(): return source
+    installed = installed_data_file("catalog.toml")
+    return installed
 
 
 def local_catalog() -> list[dict]:
@@ -514,10 +540,9 @@ def cmd_discover(args):
                     "accent": (match or {}).get("accent") or voice.get("accent", ""),
                     "description": voice.get("description", ""), "preview_url": (match or {}).get("preview_url") or voice.get("preview_url", "")})
     if args.provider in (None, "local"):
-        catalog_path = Path(os.environ.get("UTTERMUX_CATALOG", "/usr/share/uttermux/catalog.toml"))
-        if not catalog_path.is_file(): catalog_path = Path(__file__).resolve().parents[1] / "catalog/catalog.toml"
-        if catalog_path.is_file():
-            with catalog_path.open("rb") as stream: catalog = tomllib.load(stream)
+        local_path = catalog_path()
+        if local_path.is_file():
+            with local_path.open("rb") as stream: catalog = tomllib.load(stream)
             installed = {record["id"] for record in voice_records() if record["provider"] == "local"}
             for model in catalog.get("model", []):
                 for voice in model.get("voices", []):
@@ -694,11 +719,11 @@ def cmd_model(args):
         if args.action != "install":
             raise RuntimeError(f"{item['family']} removal is not automated; model data is preserved")
         name = str(item["external_installer"])
-        installer = Path("/usr/lib/uttermux") / name
+        installer = installed_helper(name)
         if not installer.exists(): installer = Path(__file__).resolve().parents[1] / "scripts" / name
         subprocess.run([str(installer)], check=True)
         return
-    manager = Path("/usr/lib/uttermux/model-manager")
+    manager = installed_helper("model-manager")
     if not manager.exists(): manager = Path(__file__).with_name("sherpa-voice")
     command = [str(manager), "model", args.action]
     if args.model_id: command.append(args.model_id)
@@ -777,7 +802,7 @@ def detect_text(text: str) -> tuple[str, float, str]:
     if sum(character.isalpha() for character in text) < int(routing.get("minimum_characters", 40)):
         return "", 0, "insufficient-text"
     data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
-    for path in (Path("/usr/lib/uttermux/vendor"), data_home / "uttermux/vendor",
+    for path in (installed_helper("vendor"), data_home / "uttermux/vendor",
                  Path(__file__).resolve().parents[1] / "daemon/vendor"):
         if path.is_dir(): sys.path.insert(0, str(path))
     try:
@@ -862,6 +887,50 @@ def doctor(_args):
     if not all(checks.values()): raise RuntimeError("one or more checks failed")
 
 
+def diagnostic_report() -> dict:
+    document = read_config()
+    providers = {name: {key: value for key, value in settings.items()
+        if key in {"enabled", "model", "automatic_language", "locales", "default_voice"}}
+        for name, settings in document.get("providers", {}).items()}
+    models = []
+    for directory in (config_dir() / "models.d",
+                      config_dir().parent / "speech-dispatcher-sherpa/models.d"):
+        for path in sorted(directory.glob("*.toml")) if directory.is_dir() else []:
+            try:
+                with path.open("rb") as stream: item = tomllib.load(stream)
+                models.append({"id": item.get("id", path.stem), "engine": item.get("engine", "")})
+            except (OSError, tomllib.TOMLDecodeError):
+                models.append({"id": path.stem, "error": "invalid manifest"})
+    services = {}
+    if shutil.which("systemctl"):
+        for service in ("uttermux.socket", "uttermux.service", "speech-dispatcher.service",
+                        "uttermux-tray.service", "uttermux-koreader.service"):
+            result = subprocess.run(["systemctl", "--user", "is-active", service],
+                                    text=True, capture_output=True, check=False)
+            services[service] = result.stdout.strip() or "inactive"
+    try:
+        runtime = next((json.loads(payload) for kind, payload in transact(STATUS) if kind == STATE), {})
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+        runtime = {"status": "unavailable"}
+    return {"schemaVersion": 1, "uttermuxVersion": APP_VERSION,
+            "hardware": hardware_profile(), "runtime": runtime, "services": services,
+            "settings": {"maxLoadedModels": document.get("max_loaded_models", 2),
+                         "localThreads": document.get("local_threads", 4),
+                         "localSilenceScale": document.get("local_silence_scale", .2),
+                         "routing": document.get("routing", {}), "providers": providers},
+            "models": models,
+            "privacy": "No credentials, credential paths, document text, profile paths, or audio are included."}
+
+
+def cmd_diagnostics(args):
+    rendered = json.dumps(diagnostic_report(), ensure_ascii=False, indent=2) + "\n"
+    if args.output:
+        atomic_write(Path(args.output).expanduser(), rendered, 0o600)
+        print(args.output)
+    else:
+        print(rendered, end="")
+
+
 def main():
     parser = argparse.ArgumentParser(prog="uttermux")
     sub = parser.add_subparsers(required=True)
@@ -905,6 +974,7 @@ def main():
     p = sub.add_parser("profile-delete"); p.add_argument("profile"); p.set_defaults(func=cmd_profile_delete)
     p = sub.add_parser("profile-rename"); p.add_argument("profile"); p.add_argument("name"); p.set_defaults(func=cmd_profile_rename)
     sub.add_parser("doctor").set_defaults(func=doctor)
+    p = sub.add_parser("diagnostics"); p.add_argument("--output"); p.set_defaults(func=cmd_diagnostics)
     args = parser.parse_args()
     try: args.func(args); return 0
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error: print(f"uttermux: {error}", file=sys.stderr); return 1

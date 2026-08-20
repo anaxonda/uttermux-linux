@@ -35,6 +35,34 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((kind, request), (self.u.SYNTHESIZE, 19))
         self.assertEqual(self.u.split_fields(payload), ["voice", "1", "hello", "fr-FR"])
 
+    def test_kokoro_long_text_is_split_without_overlap_or_tm_symbol(self):
+        text = (("First sentence is deliberately long enough to form a useful group. " * 4) +
+                "Second paragraph™ ends here. Final sentence remains present.")
+        chunks = self.u.synthesis_chunks(text, 120)
+        self.assertGreater(len(chunks), 2)
+        self.assertTrue(all(len(chunk) <= 120 for chunk in chunks))
+        joined = " ".join(chunks)
+        self.assertNotIn("™", joined)
+        self.assertEqual(joined.count("Final sentence remains present."), 1)
+
+    def test_shared_normalization_does_not_apply_external_chunking(self):
+        self.assertEqual(self.u.normalize_synthesis_text("A\u00adB™\n\nC"), "AB C")
+
+    def test_kokoro_chunks_share_one_audio_header(self):
+        broker = object.__new__(self.u.Broker)
+        model = {"id": "kokoro", "engine": "kokoro"}; voice = {"speaker_id": 2}
+        engine = mock.MagicMock(); engine.lock = mock.MagicMock()
+        def synthesize(_text, _speaker, _speed, emit, _cancelled, _profile):
+            emit(self.u.packet(self.u.AUDIO_START, 0, struct.pack("<IB", 24000, 1)))
+            emit(self.u.packet(self.u.AUDIO, 0, b"pcm"))
+        engine.synthesize.side_effect = synthesize; broker.engine = mock.Mock(return_value=engine)
+        emitted = []
+        broker.synthesize_local(model, voice, "One sentence. " * 80, 1.0,
+                                emitted.append, threading.Event())
+        kinds = [self.u.HEADER.unpack_from(raw)[2] for raw in emitted]
+        self.assertEqual(kinds.count(self.u.AUDIO_START), 1)
+        self.assertGreater(kinds.count(self.u.AUDIO), 1)
+
     def broker(self):
         broker = object.__new__(self.u.Broker)
         broker.config = {

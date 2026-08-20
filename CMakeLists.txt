@@ -38,9 +38,16 @@ set(SPEECHD_MODULE_DIR "${CMAKE_INSTALL_LIBDIR}/speech-dispatcher/speech-dispatc
 install(TARGETS sd_uttermux RUNTIME DESTINATION ${SPEECHD_MODULE_DIR})
 install(PROGRAMS daemon/uttermuxd.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME uttermuxd)
 install(PROGRAMS bridge/koreader_bridge.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME koreader-bridge)
-install(FILES systemd/uttermux.socket systemd/uttermux.service systemd/uttermux-koreader.service
-        systemd/uttermux-tray.service
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/user)
+foreach(unit uttermux.service uttermux-koreader.service uttermux-tray.service)
+  configure_file(systemd/${unit} ${CMAKE_CURRENT_BINARY_DIR}/systemd/${unit} @ONLY)
+endforeach()
+set(SYSTEMD_USER_UNIT_DIR "${CMAKE_INSTALL_PREFIX}/lib/systemd/user"
+    CACHE PATH "systemd user unit directory")
+install(FILES systemd/uttermux.socket
+        ${CMAKE_CURRENT_BINARY_DIR}/systemd/uttermux.service
+        ${CMAKE_CURRENT_BINARY_DIR}/systemd/uttermux-koreader.service
+        ${CMAKE_CURRENT_BINARY_DIR}/systemd/uttermux-tray.service
+        DESTINATION ${SYSTEMD_USER_UNIT_DIR})
 install(PROGRAMS cli/uttermux DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(PROGRAMS ui/uttermux-panel.py DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME uttermux-panel)
 install(PROGRAMS ui/uttermux-app.py DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME uttermux-app)

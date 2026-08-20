@@ -11,6 +11,7 @@ size = 349418188
 estimated_ram_mb = 560
 quantization = "FP32"
 performance_class = "balanced"
+max_chunk_characters = 360
 license = "Apache-2.0"
 source_url = "https://huggingface.co/hexgrad/Kokoro-82M"
 files = { model = "model.onnx", voices = "voices.bin", tokens = "tokens.txt", data_dir = "espeak-ng-data", lexicon = "lexicon-us-en.txt" }

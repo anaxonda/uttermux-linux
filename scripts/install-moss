@@ -8,7 +8,7 @@ data_root=${XDG_DATA_HOME:-"$HOME/.local/share"}/uttermux
 runtime_root="$data_root/runtimes/moss-tts-nano"
 source_root="$runtime_root/source"
 model_root="$data_root/models/moss-tts-nano"
-server_source=${UTTERMUX_MOSS_SERVER:-/usr/lib/uttermux/moss-server}
+server_source=${UTTERMUX_MOSS_SERVER:-"$(dirname "$0")/moss-server"}
 
 if [[ ${1:-} == --remove ]]; then
     echo "MOSS data is preserved to prevent an accidental 900 MB re-download." >&2

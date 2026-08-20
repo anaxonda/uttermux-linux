@@ -4,7 +4,7 @@ After=uttermux.socket
 Requires=uttermux.socket
 
 [Service]
-ExecStart=/usr/lib/uttermux/koreader-bridge --host 127.0.0.1 --port 5000
+ExecStart=@CMAKE_INSTALL_FULL_LIBDIR@/uttermux/koreader-bridge --host 127.0.0.1 --port 5000
 Restart=on-failure
 NoNewPrivileges=yes
 PrivateTmp=yes

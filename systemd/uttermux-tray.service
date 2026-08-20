@@ -5,7 +5,7 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/uttermux-tray
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/uttermux-tray
 Restart=on-failure
 RestartSec=2
 

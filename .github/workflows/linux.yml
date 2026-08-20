@@ -1,0 +1,38 @@
+name: Linux
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  arch-build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf python
+          speech-dispatcher rubberband onnxruntime-cpu
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Validate release metadata
+        run: python scripts/release-audit.py --ci
+
+  portable-prefix:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+      - run: pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf speech-dispatcher rubberband
+      - run: >-
+          cmake -S . -B build-prefix -G Ninja -DBUILD_TESTING=OFF
+          -DCMAKE_INSTALL_PREFIX=/opt/uttermux -DCMAKE_INSTALL_LIBDIR=lib64
+      - run: cmake --build build-prefix
+      - run: DESTDIR="$PWD/stage" cmake --install build-prefix
+      - run: test -x stage/opt/uttermux/lib64/uttermux/uttermuxd
+      - run: grep -F 'ExecStart=/opt/uttermux/lib64/uttermux/uttermuxd' stage/opt/uttermux/lib/systemd/user/uttermux.service

@@ -28,8 +28,9 @@ import urllib.error
 import urllib.request
 import wave
 
-for _common in reversed((Path(__file__).resolve().parents[1] / "python", Path("/usr/lib/uttermux"),
-                         Path("/usr/local/lib/uttermux"))):
+for _common in reversed((Path(__file__).resolve().parents[1] / "python", Path(__file__).resolve().parent,
+                         Path("/usr/lib/uttermux"), Path("/usr/lib64/uttermux"),
+                         Path("/usr/libexec/uttermux"), Path("/usr/local/lib/uttermux"))):
     if (_common / "uttermux_profiles.py").is_file() and str(_common) not in sys.path:
         sys.path.insert(0, str(_common))
 try:
@@ -53,6 +54,42 @@ GROK_LANGUAGES = (
     "it", "ja", "ko", "pt-BR", "pt-PT", "ru", "es-MX", "es-ES", "tr", "vi",
 )
 LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
+
+
+def normalize_synthesis_text(text: str) -> str:
+    """Remove ebook artifacts without changing spoken word order or offsets."""
+    cleaned = text.replace("\u00ad", "").replace("\u200b", "").replace("\ufeff", "")
+    # A bare trademark glyph is commonly exposed by ebook renderers and some
+    # phonemizers pronounce it as the distracting letters "T M".
+    cleaned = cleaned.replace("™", "")
+    return " ".join(cleaned.split())
+
+
+def synthesis_chunks(text: str, max_characters: int = 360) -> list[str]:
+    """Make bounded, non-overlapping sentence groups for fragile local models."""
+    cleaned = normalize_synthesis_text(text)
+    if not cleaned: return []
+    sentences = re.split(r"(?<=[.!?…])\s+", cleaned)
+    pieces = []
+    for sentence in sentences:
+        while len(sentence) > max_characters:
+            floor = max_characters // 2
+            positions = []
+            for mark in ("; ", ": ", ", ", " "):
+                position = sentence.rfind(mark, floor, max_characters + 1)
+                positions.append(position + (1 if position >= 0 and mark != " " else 0))
+            cut = max(positions)
+            if cut < floor: cut = max_characters
+            pieces.append(sentence[:cut].strip())
+            sentence = sentence[cut:].strip()
+        if sentence: pieces.append(sentence)
+    groups = []
+    for piece in pieces:
+        if groups and len(groups[-1]) + 1 + len(piece) <= max_characters:
+            groups[-1] += " " + piece
+        else:
+            groups.append(piece)
+    return groups
 
 
 def normalize_language(value: str) -> str:
@@ -830,7 +867,23 @@ class Broker:
     def synthesize_local(self, model, voice, text, speed, emit, cancelled, profile=None):
         engine = self.engine(model)
         try:
-            engine.synthesize(text, int(voice.get("speaker_id", 0)), speed, emit, cancelled, profile)
+            maximum = int(model.get("max_chunk_characters",
+                                    360 if model.get("engine") == "kokoro" else 0))
+            chunks = synthesis_chunks(text, maximum) if maximum > 0 else [text]
+            started = False
+
+            def coalesced(raw: bytes):
+                nonlocal started
+                kind = HEADER.unpack_from(raw)[2]
+                if kind == AUDIO_START:
+                    if started: return
+                    started = True
+                emit(raw)
+
+            for chunk in chunks:
+                if cancelled.is_set(): break
+                engine.synthesize(chunk, int(voice.get("speaker_id", 0)), speed,
+                                  coalesced, cancelled, profile)
         finally:
             engine.lock.release()
 
@@ -952,6 +1005,9 @@ class Broker:
 
     def synthesize(self, voice_id: str, text: str, speed: float, emit, cancelled,
                    requested_language: str = ""):
+        text = normalize_synthesis_text(text)
+        if not text:
+            return
         language, candidates = self._route(voice_id, requested_language, text)
         if not candidates:
             raise RuntimeError(f"no route for language {language}")

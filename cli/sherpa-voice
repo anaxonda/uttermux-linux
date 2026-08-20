@@ -36,10 +36,14 @@ def catalog_path() -> Path:
     override = os.environ.get("SHERPA_VOICE_CATALOG")
     if override:
         return Path(override)
-    installed = Path("/usr/share") / APP / "catalog.toml"
-    if installed.exists():
-        return installed
-    return Path(__file__).resolve().parents[1] / "catalog" / "catalog.toml"
+    source = Path(__file__).resolve().parents[1] / "catalog" / "catalog.toml"
+    if source.is_file(): return source
+    prefix = Path(__file__).resolve().parent.parent
+    for installed in (prefix / "share" / APP / "catalog.toml",
+                      Path("/usr/share") / APP / "catalog.toml",
+                      Path("/usr/local/share") / APP / "catalog.toml"):
+        if installed.exists(): return installed
+    return source
 
 
 def load_catalog() -> dict[str, dict]:
@@ -68,6 +72,8 @@ def manifest_dir() -> Path:
 def render_manifest(item: dict, root: Path) -> str:
     lines = ["schema_version = 1", f"id = {q(item['id'])}", f"engine = {q(item['engine'])}",
              f"root = {q(root)}", "provider = \"cpu\"", "", "[files]"]
+    if item.get("max_chunk_characters"):
+        lines.insert(5, f"max_chunk_characters = {int(item['max_chunk_characters'])}")
     for key, value in item["files"].items():
         lines.append(f"{key} = {q(value)}")
     for voice in item.get("voices", []):

@@ -119,6 +119,7 @@ class CliTests(unittest.TestCase):
         manifest = sv.render_manifest(item, Path("/tmp/model"))
         self.assertIn('language = "en-US"', manifest)
         self.assertNotIn("en_US", manifest)
+        self.assertIn("max_chunk_characters = 360", manifest)
 
     def test_enable_module_is_idempotent_for_existing_config(self):
         with tempfile.TemporaryDirectory() as d:
