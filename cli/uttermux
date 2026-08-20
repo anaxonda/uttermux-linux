@@ -101,6 +101,11 @@ def quote(value) -> str:
 def render_config(doc: dict) -> str:
     lines = ["schema_version = 2", f'max_loaded_models = {int(doc.get("max_loaded_models", 2))}',
              f'audio_cache_mb = {int(doc.get("audio_cache_mb", 64))}',
+             f'local_threads = {int(doc.get("local_threads", 4))}',
+             f'local_silence_scale = {float(doc.get("local_silence_scale", .2))}',
+             f'pocket_num_steps = {int(doc.get("pocket_num_steps", 3))}',
+             f'pocket_chunk_size = {int(doc.get("pocket_chunk_size", 4))}',
+             f'zipvoice_num_steps = {int(doc.get("zipvoice_num_steps", 4))}',
              f'preload_default_voice = {str(bool(doc.get("preload_default_voice", False))).lower()}']
     for key in ("default_voice", "fallback_voice"):
         if doc.get(key): lines.append(f'{key} = {quote(doc[key])}')
@@ -150,6 +155,11 @@ def restart() -> None:
 def setup(_args):
     doc = read_config()
     doc.setdefault("max_loaded_models", 2)
+    doc.setdefault("local_threads", 4)
+    doc.setdefault("local_silence_scale", .2)
+    doc.setdefault("pocket_num_steps", 3)
+    doc.setdefault("pocket_chunk_size", 4)
+    doc.setdefault("zipvoice_num_steps", 4)
     doc.setdefault("preload_default_voice", False)
     doc.setdefault("fallback_voice", "sherpa/vits-piper-en_US-lessac-medium/lessac")
     doc.setdefault("default_voice", doc["fallback_voice"])
@@ -338,10 +348,26 @@ def cmd_settings_schema(_args):
                             "value": int(document.get("max_loaded_models", 2))},
         "audioCacheMb": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64,
                          "value": int(document.get("audio_cache_mb", 64))},
+        "localThreads": {"type": "integer", "minimum": 1, "maximum": 16, "default": 4,
+                         "value": int(document.get("local_threads", 4))},
+        "localSilenceScale": {"type": "number", "minimum": 0, "maximum": 2, "default": .2,
+                              "value": float(document.get("local_silence_scale", .2))},
+        "pocketNumSteps": {"type": "integer", "minimum": 1, "maximum": 8, "default": 3,
+                           "value": int(document.get("pocket_num_steps", 3))},
+        "pocketChunkSize": {"type": "integer", "minimum": 1, "maximum": 16, "default": 4,
+                            "value": int(document.get("pocket_chunk_size", 4))},
+        "zipvoiceNumSteps": {"type": "integer", "minimum": 1, "maximum": 8, "default": 4,
+                             "value": int(document.get("zipvoice_num_steps", 4))},
         "preloadDefaultVoice": {"type": "boolean", "default": False,
                                 "value": bool(document.get("preload_default_voice", False))},
         "autoDetectLanguage": {"type": "boolean", "default": True,
-                               "value": bool(routing.get("auto_detect", True))}}}, indent=2))
+                               "value": bool(routing.get("auto_detect", True))},
+        "languageMinimumCharacters": {"type": "integer", "minimum": 10, "maximum": 500, "default": 40,
+                                      "value": int(routing.get("minimum_characters", 40))},
+        "languageMinimumConfidence": {"type": "number", "minimum": .5, "maximum": 1, "default": .8,
+                                      "value": float(routing.get("minimum_confidence", .8))},
+        "crossLanguageFallback": {"type": "boolean", "default": True,
+                                  "value": bool(routing.get("cross_language_fallback", True))}}}, indent=2))
 
 
 def cmd_voices(args):
@@ -371,6 +397,11 @@ def cmd_default(args):
         if isinstance(current, str): current = [current]
         routes[args.language] = [args.voice] + [item for item in current if item != args.voice]
     atomic_write(config_path(), render_config(doc)); restart()
+
+
+def cmd_reload(_args):
+    restart()
+    print("UtterMux services reloaded")
 
 
 def cmd_routes(_args):
@@ -538,6 +569,25 @@ def cmd_setting(args):
         doc["max_loaded_models"] = max(1, min(8, int(args.value)))
     elif args.name == "audio-cache-mb":
         doc["audio_cache_mb"] = max(0, min(1024, int(args.value)))
+    elif args.name == "local-threads":
+        doc["local_threads"] = max(1, min(16, int(args.value)))
+    elif args.name == "local-silence-scale":
+        doc["local_silence_scale"] = max(0.0, min(2.0, float(args.value)))
+    elif args.name == "pocket-num-steps":
+        doc["pocket_num_steps"] = max(1, min(8, int(args.value)))
+    elif args.name == "pocket-chunk-size":
+        doc["pocket_chunk_size"] = max(1, min(16, int(args.value)))
+    elif args.name == "zipvoice-num-steps":
+        doc["zipvoice_num_steps"] = max(1, min(8, int(args.value)))
+    elif args.name == "language-minimum-characters":
+        doc.setdefault("routing", {})["minimum_characters"] = max(10, min(500, int(args.value)))
+    elif args.name == "language-minimum-confidence":
+        doc.setdefault("routing", {})["minimum_confidence"] = max(.5, min(1.0, float(args.value)))
+    elif args.name == "cross-language-fallback":
+        value = args.value.casefold()
+        if value not in {"true", "false", "1", "0", "yes", "no"}:
+            raise RuntimeError("cross-language-fallback expects true or false")
+        doc.setdefault("routing", {})["cross_language_fallback"] = value in {"true", "1", "yes"}
     elif args.name == "auto-detect-language":
         value = args.value.casefold()
         if value not in {"true", "false", "1", "0", "yes", "no"}:
@@ -548,7 +598,8 @@ def cmd_setting(args):
         if value not in {"true", "false", "1", "0", "yes", "no"}:
             raise RuntimeError("preload-default-voice expects true or false")
         doc["preload_default_voice"] = value in {"true", "1", "yes"}
-    atomic_write(config_path(), render_config(doc)); restart()
+    atomic_write(config_path(), render_config(doc))
+    if not args.defer_restart: restart()
 
 
 def cmd_edge_locales(args):
@@ -752,7 +803,12 @@ def main():
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
     p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.set_defaults(func=cmd_provider)
     p = sub.add_parser("provider-default"); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
-    p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb", "auto-detect-language", "preload-default-voice")); p.add_argument("value"); p.set_defaults(func=cmd_setting)
+    p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb",
+        "local-threads", "local-silence-scale", "pocket-num-steps", "pocket-chunk-size",
+        "zipvoice-num-steps", "auto-detect-language", "language-minimum-characters",
+        "language-minimum-confidence", "cross-language-fallback", "preload-default-voice"));
+    p.add_argument("value"); p.add_argument("--defer-restart", action="store_true"); p.set_defaults(func=cmd_setting)
+    sub.add_parser("reload").set_defaults(func=cmd_reload)
     p = sub.add_parser("edge-locales"); p.add_argument("locales", nargs="+"); p.set_defaults(func=cmd_edge_locales)
     p = sub.add_parser("elevenlabs-key"); p.add_argument("key"); p.set_defaults(func=cmd_key)
     p = sub.add_parser("credential-set"); p.add_argument("provider", choices=("elevenlabs", "grok")); p.set_defaults(func=cmd_credential_set)

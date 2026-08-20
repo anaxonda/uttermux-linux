@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from unittest import mock
+from collections import OrderedDict
 
 
 def load_daemon():
@@ -122,11 +123,17 @@ class ProtocolTests(unittest.TestCase):
         engine = object.__new__(self.u.SherpaEngine)
         engine.api, engine.handle, engine.sample_rate = api, object(), 24000
         engine.lock = threading.RLock()
+        engine.engine_type, engine.silence_scale = "pocket", .1
+        engine.pocket_num_steps, engine.pocket_chunk_size = 5, 8
         emitted = []
         engine.synthesize("hello", 0, 1.0, emitted.append, threading.Event())
         kinds = [self.u.HEADER.unpack_from(raw)[2] for raw in emitted]
         self.assertEqual(kinds, [self.u.AUDIO_START, self.u.AUDIO])
         self.assertEqual(emitted[1][self.u.HEADER.size:], bytes(samples))
+        generation = api.SherpaOnnxOfflineTtsGenerateWithConfig.call_args.args[2]._obj
+        self.assertEqual(generation.num_steps, 5)
+        self.assertAlmostEqual(generation.silence_scale, .1)
+        self.assertEqual(json.loads(generation.extra), {"max_reference_audio_len": 10.0, "chunk_size": 8})
         api.SherpaOnnxDestroyOfflineTtsGeneratedAudio.assert_called_once()
 
     def test_preload_warms_only_the_configured_local_voice(self):
@@ -139,6 +146,24 @@ class ProtocolTests(unittest.TestCase):
         broker.preload_default_voice()
         broker.engine.assert_called_once_with(model)
         loaded.lock.release.assert_called_once()
+
+    def test_broker_applies_global_local_tuning_to_new_engine(self):
+        broker = object.__new__(self.u.Broker)
+        broker.config = {"local_threads": 2, "local_silence_scale": .1,
+                         "pocket_num_steps": 5, "pocket_chunk_size": 8,
+                         "zipvoice_num_steps": 6}
+        broker.engine_lock = threading.Lock(); broker.engines = OrderedDict()
+        broker.max_loaded_models = 2; broker.api = mock.Mock()
+        fake = mock.MagicMock(); fake.lock = threading.RLock()
+        model = {"id": "pocket", "engine": "pocket", "root": "/tmp", "files": {}, "num_threads": 9}
+        with mock.patch.object(self.u, "SherpaEngine", return_value=fake) as constructor:
+            result = broker.engine(model)
+        effective = constructor.call_args.args[1]
+        self.assertIs(result, fake)
+        self.assertEqual((effective["num_threads"], effective["silence_scale"]), (2, .1))
+        self.assertEqual((effective["pocket_num_steps"], effective["pocket_chunk_size"]), (5, 8))
+        self.assertEqual(effective["zipvoice_num_steps"], 6)
+        result.lock.release()
 
     def test_rejects_bad_protocol_version(self):
         raw = bytearray(self.u.packet(self.u.HEALTH, 1)); raw[4:6] = (99).to_bytes(2, "little")

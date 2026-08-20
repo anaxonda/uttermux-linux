@@ -161,6 +161,11 @@ PROGRESS = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(ctypes.c_float), ctyp
 class SherpaEngine:
     def __init__(self, api: ctypes.CDLL, model: dict):
         self.api, self.model, self.lock = api, model, threading.RLock()
+        self.engine_type = model["engine"]
+        self.silence_scale = float(model.get("silence_scale", .2))
+        self.pocket_num_steps = int(model.get("pocket_num_steps", 3))
+        self.pocket_chunk_size = int(model.get("pocket_chunk_size", 4))
+        self.zipvoice_num_steps = int(model.get("zipvoice_num_steps", 4))
         root = Path(model["root"])
         file_cfg = model["files"]
         self._bytes: list[bytes] = []
@@ -178,7 +183,7 @@ class SherpaEngine:
         cfg.model.num_threads = int(model.get("num_threads", 4))
         cfg.model.provider = b(model.get("provider", "cpu"))
         cfg.max_num_sentences = 1
-        cfg.silence_scale = 0.2
+        cfg.silence_scale = self.silence_scale
         cfg.rule_fsts = b(",".join(str(root / x) for x in file_cfg.get("rule_fsts", [])))
         engine = model["engine"]
         if engine == "kokoro":
@@ -230,7 +235,8 @@ class SherpaEngine:
                 emit(packet(AUDIO, 0, raw[offset:offset + max_payload]))
             return 0 if cancelled.is_set() else 1
 
-        generation = GenerationConfig(silence_scale=.2, speed=speed, sid=speaker)
+        silence_scale = float(getattr(self, "silence_scale", .2))
+        generation = GenerationConfig(silence_scale=silence_scale, speed=speed, sid=speaker)
         reference_samples = None
         reference_text = None
         extra = None
@@ -246,13 +252,15 @@ class SherpaEngine:
             if profile.get("referenceText"):
                 reference_text = profile["referenceText"].encode("utf-8")
                 generation.reference_text = reference_text
-            if profile.get("engine") == "pocket":
-                generation.num_steps = 3
-                extra = b'{"max_reference_audio_len":10.0,"chunk_size":4}'
-            elif profile.get("engine") == "zipvoice":
-                generation.num_steps = 4
-                extra = b'{"min_char_in_sentence":10}'
-            generation.extra = extra
+        engine_type = getattr(self, "engine_type", profile.get("engine", "") if profile else "")
+        if engine_type == "pocket":
+            generation.num_steps = int(getattr(self, "pocket_num_steps", 3))
+            extra = json.dumps({"max_reference_audio_len": 10.0,
+                                "chunk_size": int(getattr(self, "pocket_chunk_size", 4))}).encode()
+        elif engine_type == "zipvoice":
+            generation.num_steps = int(getattr(self, "zipvoice_num_steps", 4))
+            extra = b'{"min_char_in_sentence":10}'
+        generation.extra = extra
         with self.lock:
             audio = self.api.SherpaOnnxOfflineTtsGenerateWithConfig(
                 self.handle, text.encode("utf-8"), ctypes.byref(generation), callback, None)
@@ -693,7 +701,13 @@ class Broker:
                 engine = self.engines[model_id]
                 engine.lock.acquire()
                 return engine
-            engine = SherpaEngine(self.api, model)
+            effective_model = dict(model)
+            effective_model["num_threads"] = int(self.config.get("local_threads", model.get("num_threads", 4)))
+            effective_model["silence_scale"] = float(self.config.get("local_silence_scale", .2))
+            effective_model["pocket_num_steps"] = int(self.config.get("pocket_num_steps", 3))
+            effective_model["pocket_chunk_size"] = int(self.config.get("pocket_chunk_size", 4))
+            effective_model["zipvoice_num_steps"] = int(self.config.get("zipvoice_num_steps", 4))
+            engine = SherpaEngine(self.api, effective_model)
             self.engines[model_id] = engine
             while len(self.engines) > self.max_loaded_models:
                 _, evicted = self.engines.popitem(last=False)

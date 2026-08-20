@@ -157,6 +157,22 @@ Preload active local voice**. This spends RAM at login but removes model loading
 from the first request. It cannot remove the time the model needs to synthesize
 the first sentence.
 
+Advanced performance controls are available in both Settings and the CLI:
+
+| Setting | Recommended | Effect |
+| --- | ---: | --- |
+| `local-threads` | 4 | ONNX threads per local sherpa model; excessive threads can be slower |
+| `local-silence-scale` | 0.2 | Scales pauses generated inside one local utterance |
+| `pocket-num-steps` | 3 | Pocket quality/latency tradeoff |
+| `pocket-chunk-size` | 4 | Pocket continuity/responsiveness tradeoff |
+| `zipvoice-num-steps` | 4 | ZipVoice quality/latency tradeoff |
+| `max-loaded-models` | 2 | Warm-model count versus RAM use |
+
+For example, `uttermux setting local-threads 2` applies the new value and
+reloads the broker. The GUI batches all advanced changes and reloads only once.
+MOSS uses a separate two-stage pipeline and will receive independent generation
+and decoder controls when that backend is promoted to supported status.
+
 ## Language routing
 
 Applications may declare a language. Otherwise, UtterMux detects sufficiently

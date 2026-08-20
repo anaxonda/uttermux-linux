@@ -375,10 +375,32 @@ class SettingsPage(Gtk.Box):
         box.append(self.setting_row("Detect language automatically", "Routes longer text to a compatible configured voice.", self.auto_language))
         self.preload_voice = Gtk.Switch(); self.preload_voice.connect("state-set", self.set_boolean, "preload-default-voice")
         box.append(self.setting_row("Preload active local voice", "Uses more memory after login, but removes the first-use model loading delay.", self.preload_voice))
+        box.append(Gtk.Separator())
+        performance_heading = Gtk.Label(label="Local inference", xalign=0); performance_heading.add_css_class("heading")
+        box.append(performance_heading)
+        self.local_threads = Gtk.SpinButton.new_with_range(1, 16, 1)
+        box.append(self.setting_row("ONNX CPU threads", "Four is recommended on this computer. More can be slower on older CPUs; changes reload local models.", self.local_threads))
+        self.silence_scale = Gtk.SpinButton.new_with_range(0, 2, .05); self.silence_scale.set_digits(2)
+        box.append(self.setting_row("Generated pause scale", "Scales pauses created inside a local-model utterance. It cannot remove pauses inserted by the reading application.", self.silence_scale))
+        self.pocket_steps = Gtk.SpinButton.new_with_range(1, 8, 1)
+        box.append(self.setting_row("Pocket quality steps", "More steps may improve quality but increase latency. Recommended: 3.", self.pocket_steps))
+        self.pocket_chunk = Gtk.SpinButton.new_with_range(1, 16, 1)
+        box.append(self.setting_row("Pocket generation chunk", "Larger chunks may improve continuity at the cost of responsiveness. Recommended: 4.", self.pocket_chunk))
+        self.zipvoice_steps = Gtk.SpinButton.new_with_range(1, 8, 1)
+        box.append(self.setting_row("ZipVoice quality steps", "More flow-matching steps trade speed for quality. Recommended: 4.", self.zipvoice_steps))
         self.model_cache = Gtk.SpinButton.new_with_range(1, 8, 1)
         box.append(self.setting_row("Warm local models", "More reduces model-switch delay but increases RAM use.", self.model_cache))
         self.audio_cache = Gtk.SpinButton.new_with_range(0, 1024, 16)
         box.append(self.setting_row("Cloud audio cache (MB)", "Zero disables reuse; cached utterances avoid repeat API calls.", self.audio_cache))
+        box.append(Gtk.Separator())
+        language_heading = Gtk.Label(label="Language routing", xalign=0); language_heading.add_css_class("heading")
+        box.append(language_heading)
+        self.language_characters = Gtk.SpinButton.new_with_range(10, 500, 5)
+        box.append(self.setting_row("Detection minimum characters", "Shorter text uses the configured default language instead of an unreliable guess. Recommended: 40.", self.language_characters))
+        self.language_confidence = Gtk.SpinButton.new_with_range(.5, 1, .05); self.language_confidence.set_digits(2)
+        box.append(self.setting_row("Detection confidence", "Higher values reduce incorrect automatic language changes. Recommended: 0.80.", self.language_confidence))
+        self.cross_language = Gtk.Switch(); self.cross_language.connect("state-set", self.set_boolean, "cross-language-fallback")
+        box.append(self.setting_row("Allow cross-language fallback", "If no compatible voice works, permit the global fallback voice rather than failing silently.", self.cross_language))
         apply_advanced = Gtk.Button(label="Apply advanced settings", halign=Gtk.Align.END)
         apply_advanced.connect("clicked", self.apply_advanced); box.append(apply_advanced)
         advanced.set_child(box); self.append(advanced)
@@ -417,8 +439,16 @@ class SettingsPage(Gtk.Box):
         playback = schema.get("playback", {})
         self.auto_language.set_active(bool(playback.get("autoDetectLanguage", {}).get("value", True)))
         self.preload_voice.set_active(bool(playback.get("preloadDefaultVoice", {}).get("value", False)))
+        self.local_threads.set_value(playback.get("localThreads", {}).get("value", 4))
+        self.silence_scale.set_value(playback.get("localSilenceScale", {}).get("value", .2))
+        self.pocket_steps.set_value(playback.get("pocketNumSteps", {}).get("value", 3))
+        self.pocket_chunk.set_value(playback.get("pocketChunkSize", {}).get("value", 4))
+        self.zipvoice_steps.set_value(playback.get("zipvoiceNumSteps", {}).get("value", 4))
         self.model_cache.set_value(playback.get("maxLoadedModels", {}).get("value", 2))
         self.audio_cache.set_value(playback.get("audioCacheMb", {}).get("value", 64))
+        self.language_characters.set_value(playback.get("languageMinimumCharacters", {}).get("value", 40))
+        self.language_confidence.set_value(playback.get("languageMinimumConfidence", {}).get("value", .8))
+        self.cross_language.set_active(bool(playback.get("crossLanguageFallback", {}).get("value", True)))
         self.loading = False; return GLib.SOURCE_REMOVE
 
     def toggle_provider(self, widget, state, provider):
@@ -438,10 +468,21 @@ class SettingsPage(Gtk.Box):
 
     def apply_advanced(self, *_args):
         def work():
-            results = [subprocess.run(command("setting", name, str(value)), text=True, capture_output=True)
-                       for name, value in (("max-loaded-models", self.model_cache.get_value_as_int()),
-                                           ("audio-cache-mb", self.audio_cache.get_value_as_int()))]
+            values = (("local-threads", self.local_threads.get_value_as_int()),
+                      ("local-silence-scale", self.silence_scale.get_value()),
+                      ("pocket-num-steps", self.pocket_steps.get_value_as_int()),
+                      ("pocket-chunk-size", self.pocket_chunk.get_value_as_int()),
+                      ("zipvoice-num-steps", self.zipvoice_steps.get_value_as_int()),
+                      ("max-loaded-models", self.model_cache.get_value_as_int()),
+                      ("audio-cache-mb", self.audio_cache.get_value_as_int()),
+                      ("language-minimum-characters", self.language_characters.get_value_as_int()),
+                      ("language-minimum-confidence", self.language_confidence.get_value()))
+            results = [subprocess.run(command("setting", name, str(value), "--defer-restart"), text=True, capture_output=True)
+                       for name, value in values]
             error = next((item.stderr.strip() or item.stdout.strip() for item in results if item.returncode), "")
+            if not error:
+                reloaded = subprocess.run(command("reload"), text=True, capture_output=True)
+                if reloaded.returncode: error = reloaded.stderr.strip() or reloaded.stdout.strip()
             GLib.idle_add(self.window.alert, "Could not save settings" if error else "Settings saved", error)
         threading.Thread(target=work, daemon=True).start()
 

@@ -32,6 +32,18 @@ class CliTests(unittest.TestCase):
         self.assertIn('[routing.voices]', rendered)
         self.assertIn('"fr" = ["elevenlabs/bill", "edge/denise"]', rendered)
 
+    def test_render_preserves_advanced_tuning(self):
+        rendered = ut.render_config({
+            "local_threads": 2, "local_silence_scale": .1,
+            "pocket_num_steps": 5, "pocket_chunk_size": 8,
+            "zipvoice_num_steps": 6,
+        })
+        self.assertIn("local_threads = 2", rendered)
+        self.assertIn("local_silence_scale = 0.1", rendered)
+        self.assertIn("pocket_num_steps = 5", rendered)
+        self.assertIn("pocket_chunk_size = 8", rendered)
+        self.assertIn("zipvoice_num_steps = 6", rendered)
+
     def test_short_text_is_not_auto_detected(self):
         language, confidence, reason = ut.detect_text("Bonjour.")
         self.assertEqual((language, confidence, reason), ("", 0, "insufficient-text"))
