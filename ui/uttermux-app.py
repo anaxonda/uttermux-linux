@@ -45,18 +45,28 @@ class VoicePage(Gtk.Box):
     def __init__(self, window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.window, self.document, self.records = window, {}, []
+        self.loading_filters = False
         self.set_margin_top(16); self.set_margin_bottom(16); self.set_margin_start(16); self.set_margin_end(16)
         self.active = Gtk.Label(xalign=0, wrap=True); self.active.add_css_class("title-3"); self.append(self.active)
-        self.filters = {}
+        self.filters, self.filter_state = {}, saved_state().get("filters", {})
         grid = Gtk.Grid(column_spacing=8, row_spacing=6); self.append(grid)
-        state = saved_state().get("filters", {})
-        for column, (key, label, placeholder) in enumerate((
+        for index, (key, label, placeholder) in enumerate((
             ("voice", "Voice", "Search voice name"), ("language", "Language", "e.g. French or fr"),
-            ("service", "Service / runtime", "e.g. Local or Edge"), ("model", "Model", "e.g. Pocket"))):
-            grid.attach(Gtk.Label(label=label, xalign=0), column, 0, 1, 1)
+            ("provider", "Provider", "e.g. Local, Edge, ElevenLabs"),
+            ("model", "Model family", "e.g. Pocket, Kokoro, Qwen"))):
+            column, base_row = index % 2, (index // 2) * 2
+            grid.attach(Gtk.Label(label=label, xalign=0), column, base_row, 1, 1)
             entry = Gtk.SearchEntry(placeholder_text=placeholder, hexpand=True)
-            entry.set_text(state.get(key, "")); entry.connect("search-changed", self.filter_changed)
-            grid.attach(entry, column, 1, 1, 1); self.filters[key] = entry
+            entry.set_text(self.filter_state.get(key, "")); entry.connect("search-changed", self.filter_changed)
+            grid.attach(entry, column, base_row + 1, 1, 1); self.filters[key] = entry
+        choice_grid = Gtk.Grid(column_spacing=8, row_spacing=4); self.append(choice_grid)
+        self.exact_filters = {}
+        for column, (key, label, initial) in enumerate((("provider", "Provider", "All providers"),
+                ("language", "Language", "All languages"), ("family", "Model family", "All model families"))):
+            choice_grid.attach(Gtk.Label(label=label, xalign=0), column, 0, 1, 1)
+            dropdown = Gtk.DropDown(model=Gtk.StringList.new([initial]), hexpand=True)
+            dropdown.connect("notify::selected", self.filter_changed)
+            choice_grid.attach(dropdown, column, 1, 1, 1); self.exact_filters[key] = dropdown
         row = Gtk.Box(spacing=8); self.append(row)
         self.location = Gtk.DropDown(model=Gtk.StringList.new(["All locations", "Offline", "Online"]))
         self.readiness = Gtk.DropDown(model=Gtk.StringList.new(["All voices", "Ready", "Downloadable"]))
@@ -86,7 +96,9 @@ class VoicePage(Gtk.Box):
 
     def loaded(self, document, status, error):
         if error: self.status.set_text(error); return GLib.SOURCE_REMOVE
-        self.document = document; models = {item["id"]: item for item in document.get("models", [])}
+        self.document = document
+        self.provider_names = {item["id"]: item.get("name", item["id"]) for item in document.get("providers", [])}
+        models = {item["id"]: item for item in document.get("models", [])}
         self.records = []
         for voice in document.get("voices", []):
             model = models.get(voice["modelId"], {})
@@ -99,18 +111,51 @@ class VoicePage(Gtk.Box):
                     "model": models.get(profile["modelVersion"], {}), "ready": profile.get("available", False),
                     "preview": "generated", "profile": True})
         self.default_id = status.get("configuredDefault", "")
+        self.populate_exact_filters()
         current = next((item for item in self.records if item["id"] == self.default_id), None)
         self.active.set_markup("<b>Active voice:</b> " + html.escape(current["name"] if current else self.default_id or "None"))
         self.rebuild(); return GLib.SOURCE_REMOVE
 
     def clear(self, *_args):
         for entry in self.filters.values(): entry.set_text("")
+        for dropdown in self.exact_filters.values(): dropdown.set_selected(0)
         for dropdown in (self.location, self.readiness, self.performance, self.sorting): dropdown.set_selected(0)
         self.rebuild()
 
     def filter_changed(self, *_args):
-        save_state({"filters": {key: entry.get_text() for key, entry in self.filters.items()}})
+        if self.loading_filters: return
+        filters = {key: entry.get_text() for key, entry in self.filters.items()}
+        filters.update({f"exact_{key}": self.dropdown_text(widget) for key, widget in self.exact_filters.items()})
+        filters.update({"location_index": self.location.get_selected(), "readiness_index": self.readiness.get_selected(),
+                        "performance_index": self.performance.get_selected(), "sorting_index": self.sorting.get_selected()})
+        self.filter_state = filters
+        save_state({"filters": filters})
         self.rebuild()
+
+    @staticmethod
+    def dropdown_text(dropdown):
+        item = dropdown.get_selected_item()
+        return item.get_string() if item else ""
+
+    def populate_exact_filters(self):
+        self.loading_filters = True
+        models = {item["id"]: item for item in self.document.get("models", [])}
+        values = {
+            "provider": sorted({self.provider_names.get(models.get(item.get("modelId"), {}).get("providerId", "local"),
+                                                        models.get(item.get("modelId"), {}).get("providerId", "local"))
+                                for item in self.records}),
+            "language": sorted({language for item in self.records for language in item.get("languages", [])}),
+            "family": sorted({models.get(item.get("modelId"), {}).get("library", "") for item in self.records if models.get(item.get("modelId"), {}).get("library")}),
+        }
+        labels = {"provider": "All providers", "language": "All languages", "family": "All model families"}
+        for key, dropdown in self.exact_filters.items():
+            wanted = self.filter_state.get(f"exact_{key}", labels[key])
+            options = [labels[key], *values[key]]; dropdown.set_model(Gtk.StringList.new(options))
+            dropdown.set_selected(options.index(wanted) if wanted in options else 0)
+        for key, widget in (("location_index", self.location), ("readiness_index", self.readiness),
+                            ("performance_index", self.performance), ("sorting_index", self.sorting)):
+            widget.set_selected(int(self.filter_state.get(key, 0)))
+        self.loading_filters = False
 
     def rebuild(self):
         while child := self.listbox.get_first_child(): self.listbox.remove(child)
@@ -118,10 +163,15 @@ class VoicePage(Gtk.Box):
         result = []
         for record in self.records:
             model = record.get("model", {}); provider = model.get("providerId", "local")
+            provider_label = self.provider_names.get(provider, provider)
             fields = {"voice": record.get("name", ""), "language": " ".join(record.get("languages", [])),
-                      "service": provider + " " + model.get("engine", ""),
+                      "provider": provider + " " + provider_label + " " + model.get("engine", ""),
                       "model": record.get("modelId", "") + " " + model.get("library", "")}
             if any(not all(term in fields[key].casefold() for term in wanted) for key, wanted in terms.items()): continue
+            exact = {key: self.dropdown_text(widget) for key, widget in self.exact_filters.items()}
+            if exact["provider"] != "All providers" and provider_label != exact["provider"]: continue
+            if exact["language"] != "All languages" and exact["language"] not in record.get("languages", []): continue
+            if exact["family"] != "All model families" and model.get("library", "") != exact["family"]: continue
             online = model.get("location") == "cloud"
             if self.location.get_selected() == 1 and online: continue
             if self.location.get_selected() == 2 and not online: continue
@@ -138,7 +188,9 @@ class VoicePage(Gtk.Box):
         else: result.sort(key=lambda item: (item["id"] != self.default_id, not item.get("ready", False), item["name"].casefold()))
         for record in result:
             model = record.get("model", {}); row = Gtk.Box(spacing=8)
-            details = [model.get("library", record.get("modelId", "")), ", ".join(record.get("languages", []))]
+            provider = model.get("providerId", "local")
+            details = [self.provider_names.get(provider, provider), model.get("library", record.get("modelId", "")),
+                       ", ".join(record.get("languages", [])), model.get("performanceClass", "")]
             if model.get("downloadSizeMb"): details.append(f"{model['downloadSizeMb']} MB download")
             if model.get("estimatedRamMb"): details.append(f"~{model['estimatedRamMb']} MB RAM")
             if model.get("quantization"): details.append(model["quantization"])
@@ -147,7 +199,9 @@ class VoicePage(Gtk.Box):
             label.set_markup(f"<b>{html.escape(marker + record['name'])}</b>\n<small>{html.escape(' · '.join(filter(None, details)))}</small>")
             row.append(label)
             if record.get("ready"):
-                choose = Gtk.Button(label="Use"); choose.connect("clicked", self.choose, record); row.append(choose)
+                choose = Gtk.Button(label="Active" if record["id"] == self.default_id else "Use")
+                choose.set_sensitive(record["id"] != self.default_id)
+                choose.connect("clicked", self.choose, record); row.append(choose)
                 preview = Gtk.Button(label="Preview"); preview.connect("clicked", self.preview, record); row.append(preview)
             elif model.get("location") == "on-device":
                 install = Gtk.Button(label="Download"); install.connect("clicked", self.install, record); row.append(install)
@@ -155,7 +209,18 @@ class VoicePage(Gtk.Box):
         self.status.set_text(f"{len(result)} voice{'s' if len(result) != 1 else ''}")
 
     def choose(self, _button, record): self.window.run_task(command("default", record["id"]), "Voice selected", self.load)
-    def preview(self, _button, record): subprocess.Popen(command("preview", record["id"], "This is an UtterMux voice preview."))
+    def preview(self, button, record):
+        button.set_sensitive(False); button.set_label("Playing…")
+        def work():
+            result = subprocess.run(command("preview", record["id"], "This is an UtterMux voice preview."),
+                                    text=True, capture_output=True)
+            GLib.idle_add(done, result)
+        def done(result):
+            button.set_sensitive(True); button.set_label("Preview")
+            if result.returncode:
+                self.window.alert("Preview failed", result.stderr.strip() or result.stdout.strip())
+            return GLib.SOURCE_REMOVE
+        threading.Thread(target=work, daemon=True).start()
     def install(self, _button, record): self.window.run_task(command("model", "install", record["modelId"]), "Model installed", self.load)
 
 
@@ -272,28 +337,122 @@ class CreatePage(Gtk.Box):
 class SettingsPage(Gtk.Box):
     def __init__(self, window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        self.window = window; self.set_margin_top(20); self.set_margin_start(20); self.set_margin_end(20)
+        self.window, self.loading = window, True
+        self.set_margin_top(20); self.set_margin_bottom(20); self.set_margin_start(20); self.set_margin_end(20)
         title = Gtk.Label(label="Settings", xalign=0); title.add_css_class("title-2"); self.append(title)
-        self.append(Gtk.Label(label="Online services", xalign=0, css_classes=["heading"]))
+        self.append(Gtk.Label(label="Online providers", xalign=0, css_classes=["heading"]))
+        providers_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE); providers_box.add_css_class("boxed-list")
+        self.provider_switches = {}
         for provider, title, detail in (("edge", "Microsoft Edge", "Free network voices; no API key."),
             ("elevenlabs", "ElevenLabs", "Subscription voices and Instant Voice Cloning."),
             ("grok", "xAI / Grok", "Multilingual cloud synthesis using your xAI key.")):
             row = Gtk.Box(spacing=8); text = Gtk.Label(xalign=0, hexpand=True, wrap=True)
             text.set_markup(f"<b>{html.escape(title)}</b>\n<small>{html.escape(detail)}</small>"); row.append(text)
-            enable = Gtk.Button(label="Enable"); enable.connect("clicked", lambda _b, p=provider: self.window.run_task(command("provider", "enable", p), f"{p} enabled")); row.append(enable)
-            disable = Gtk.Button(label="Disable"); disable.connect("clicked", lambda _b, p=provider: self.window.run_task(command("provider", "disable", p), f"{p} disabled")); row.append(disable)
             if provider in {"elevenlabs", "grok"}:
-                key = Gtk.Button(label="Set API key…"); key.connect("clicked", self.set_key, provider, title); row.append(key)
-            self.append(row)
-        advanced = Gtk.Expander(label="Advanced playback and diagnostics"); box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.append(Gtk.Label(label="Model cache controls how many local engines stay warm. Audio cache reuses completed cloud utterances. Defaults favor a 16 GB desktop.", xalign=0, wrap=True))
-        doctor = Gtk.Button(label="Run diagnostics"); doctor.connect("clicked", lambda *_: self.window.run_task(command("doctor"), "Diagnostics completed")); box.append(doctor)
+                key = Gtk.Button(label="API key…"); key.connect("clicked", self.set_key, provider, title); row.append(key)
+            toggle = Gtk.Switch(valign=Gtk.Align.CENTER); toggle.connect("state-set", self.toggle_provider, provider)
+            self.provider_switches[provider] = toggle; row.append(toggle); providers_box.append(row)
+        self.append(providers_box)
+
+        advanced = Gtk.Expander(label="Advanced playback and language routing")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                      margin_top=10, margin_bottom=8, margin_start=8, margin_end=8)
+        box.append(Gtk.Label(label="These controls affect the broker used by Firefox, Zotero, selection reading, and KOReader.", xalign=0, wrap=True))
+        self.auto_language = Gtk.Switch(); self.auto_language.connect("state-set", self.set_boolean, "auto-detect-language")
+        box.append(self.setting_row("Detect language automatically", "Routes longer text to a compatible configured voice.", self.auto_language))
+        self.model_cache = Gtk.SpinButton.new_with_range(1, 8, 1)
+        box.append(self.setting_row("Warm local models", "More reduces model-switch delay but increases RAM use.", self.model_cache))
+        self.audio_cache = Gtk.SpinButton.new_with_range(0, 1024, 16)
+        box.append(self.setting_row("Cloud audio cache (MB)", "Zero disables reuse; cached utterances avoid repeat API calls.", self.audio_cache))
+        apply_advanced = Gtk.Button(label="Apply advanced settings", halign=Gtk.Align.END)
+        apply_advanced.connect("clicked", self.apply_advanced); box.append(apply_advanced)
         advanced.set_child(box); self.append(advanced)
-        system = Gtk.Button(label="Open system text-to-speech settings"); system.connect("clicked", self.open_system); self.append(system)
+
+        tools = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE); tools.add_css_class("boxed-list")
+        doctor = Gtk.Button(label="Run diagnostics"); doctor.connect("clicked", self.run_diagnostics)
+        tools.append(self.action_row("Diagnostics", "Check broker, Speech Dispatcher, models, ffmpeg, and selection tools.", doctor))
+        models = Gtk.Button(label="Open folder"); models.connect("clicked", self.open_models)
+        tools.append(self.action_row("Downloaded models", "Open the user model storage directory.", models))
+        self.system_command = self.find_system_settings()
+        if self.system_command:
+            system = Gtk.Button(label="Open settings"); system.connect("clicked", self.open_system)
+            tools.append(self.action_row("System text-to-speech", "Open the desktop environment's TTS settings panel.", system))
+        self.append(tools)
+        self.load()
+
+    @staticmethod
+    def setting_row(title, detail, control):
+        row = Gtk.Box(spacing=8); label = Gtk.Label(xalign=0, hexpand=True, wrap=True)
+        label.set_markup(f"<b>{html.escape(title)}</b>\n<small>{html.escape(detail)}</small>"); row.append(label); row.append(control)
+        return row
+
+    action_row = setting_row
+
+    def load(self):
+        def work():
+            try: result = (run_json("catalog"), run_json("settings-schema"))
+            except Exception as error: GLib.idle_add(self.window.alert, "Could not load settings", str(error)); return
+            GLib.idle_add(self.loaded, *result)
+        threading.Thread(target=work, daemon=True).start()
+
+    def loaded(self, catalog, schema):
+        self.loading = True
+        enabled = {item["id"]: item.get("enabled", False) for item in catalog.get("providers", [])}
+        for provider, widget in self.provider_switches.items(): widget.set_active(bool(enabled.get(provider)))
+        playback = schema.get("playback", {})
+        self.auto_language.set_active(bool(playback.get("autoDetectLanguage", {}).get("value", True)))
+        self.model_cache.set_value(playback.get("maxLoadedModels", {}).get("value", 2))
+        self.audio_cache.set_value(playback.get("audioCacheMb", {}).get("value", 64))
+        self.loading = False; return GLib.SOURCE_REMOVE
+
+    def toggle_provider(self, widget, state, provider):
+        if self.loading: return False
+        widget.set_sensitive(False)
+        self.window.run_task(command("provider", "enable" if state else "disable", provider),
+                             f"{provider} {'enabled' if state else 'disabled'}",
+                             lambda: (widget.set_sensitive(True), self.window.voices.load()))
+        return False
+
+    def set_boolean(self, _widget, state, name):
+        if not self.loading: self.window.run_task(command("setting", name, str(bool(state)).lower()), "Setting saved")
+        return False
+
+    def set_number(self, widget, name):
+        if not self.loading: self.window.run_task(command("setting", name, str(widget.get_value_as_int())), "Setting saved")
+
+    def apply_advanced(self, *_args):
+        def work():
+            results = [subprocess.run(command("setting", name, str(value)), text=True, capture_output=True)
+                       for name, value in (("max-loaded-models", self.model_cache.get_value_as_int()),
+                                           ("audio-cache-mb", self.audio_cache.get_value_as_int()))]
+            error = next((item.stderr.strip() or item.stdout.strip() for item in results if item.returncode), "")
+            GLib.idle_add(self.window.alert, "Could not save settings" if error else "Settings saved", error)
+        threading.Thread(target=work, daemon=True).start()
+
+    def run_diagnostics(self, *_args):
+        def work():
+            result = subprocess.run(command("doctor"), text=True, capture_output=True)
+            GLib.idle_add(self.window.alert, "Diagnostics passed" if result.returncode == 0 else "Diagnostics found a problem",
+                          (result.stdout + result.stderr).strip())
+        threading.Thread(target=work, daemon=True).start()
+
+    def open_models(self, *_args):
+        path = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "uttermux/models"
+        path.mkdir(parents=True, exist_ok=True); Gio.AppInfo.launch_default_for_uri(path.as_uri(), None)
+
+    @staticmethod
+    def find_system_settings():
+        if GLib.find_program_in_path("kcmshell6"):
+            result = subprocess.run(["kcmshell6", "--list"], text=True, capture_output=True)
+            module = next((line.split()[0] for line in result.stdout.splitlines()
+                           if "speech" in line.casefold() or "text-to-speech" in line.casefold()), "")
+            if module: return ["kcmshell6", module]
+        if GLib.find_program_in_path("gnome-control-center"):
+            return ["gnome-control-center", "accessibility"]
+        return None
 
     def open_system(self, *_args):
-        for cmd in (["systemsettings", "kcm_tts"], ["gnome-control-center", "accessibility"]):
-            if GLib.find_program_in_path(cmd[0]): subprocess.Popen(cmd); return
+        if self.system_command: subprocess.Popen(self.system_command)
 
     def set_key(self, _button, provider, title):
         dialog = Gtk.Dialog(title=f"{title} API key", transient_for=self.window, modal=True)
@@ -315,11 +474,17 @@ class SettingsPage(Gtk.Box):
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="UtterMux", default_width=920, default_height=720)
-        header = Gtk.HeaderBar(); header.set_title_widget(Gtk.Label(label="UtterMux", css_classes=["title"])); self.set_titlebar(header)
-        notebook = Gtk.Notebook()
-        self.voices = VoicePage(self); notebook.append_page(self.voices, Gtk.Label(label="Voices"))
-        notebook.append_page(CreatePage(self), Gtk.Label(label="Create"))
-        notebook.append_page(SettingsPage(self), Gtk.Label(label="Settings")); self.set_child(notebook)
+        header = Gtk.HeaderBar(); stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        switcher = Gtk.StackSwitcher(stack=stack); header.set_title_widget(switcher); self.set_titlebar(header)
+        self.voices = VoicePage(self); stack.add_titled(self.voices, "voices", "Voices")
+        stack.add_titled(self.scrolled(CreatePage(self)), "create", "Create voice")
+        stack.add_titled(self.scrolled(SettingsPage(self)), "settings", "Settings"); self.set_child(stack)
+
+    @staticmethod
+    def scrolled(child):
+        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroll.set_child(child)
+        return scroll
 
     def run_task(self, argv, success, callback=None):
         def work():
@@ -333,6 +498,10 @@ class Window(Gtk.ApplicationWindow):
                 else: Gtk.AlertDialog(message=success).show(self)
             return GLib.SOURCE_REMOVE
         threading.Thread(target=work, daemon=True).start()
+
+    def alert(self, message, detail=""):
+        Gtk.AlertDialog(message=message, detail=detail).show(self)
+        return GLib.SOURCE_REMOVE
 
 
 class Application(Gtk.Application):

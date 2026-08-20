@@ -177,15 +177,44 @@ you have the necessary rights and consent.
 | Supertonic 3 INT8 | Local | Downloadable | No | Ten styles, multilingual |
 | Pocket INT8 | Local | Downloadable | Yes | Reference-conditioned; four verified presets included with the download |
 | ZipVoice Distill INT8 | Local | Downloadable | Yes | English/Chinese; exact reference transcript required |
-| Qwen3-TTS | Local | Planned companion | Yes | Kept out of the core package because of model/runtime size |
+| Qwen3-TTS 0.6B CustomVoice | Local | Optional companion | Presets now; cloning planned | Nine presets, ten languages, persistent streaming native runtime; ~2.4 GB download |
 | Edge | Online | Supported | No | Unofficial consumer endpoint; may change upstream |
 | ElevenLabs | Online | Supported | Yes (IVC) | Requires API key and Voices write permission |
 | xAI/Grok | Online | Supported | Provider-managed | Automatic multilingual mode available |
 | Azure, Google, AWS, OpenAI, Deepgram, Cartesia, PlayHT, Resemble | Online | Compatibility roadmap | Varies | Not advertised as working until end-to-end credentials tests pass |
 
-MOSS is intentionally excluded. Audio8, Chatterbox, NeuTTS, local Qwen, and
+MOSS is intentionally excluded. Audio8, Chatterbox, NeuTTS, and
 other larger runtimes remain benchmark candidates rather than nonfunctional
 rows in the application.
+
+Qwen is deliberately optional and never bundled. Install OpenBLAS first, then
+install it from the Voices screen or CLI:
+
+```sh
+sudo pacman -S --needed openblas
+uttermux model install qwen3-tts-0.6b-customvoice
+```
+
+The installer pins both the native runtime and official model revisions. It
+builds the AVX2/ARM-appropriate executable under the user's data directory and
+keeps the model loaded in a local streaming companion after first use. On the
+project's i7-8650U reference desktop, direct cold INT8 synthesis used about
+1.84 GB RSS and measured RTF 3.42. Runtime INT4 improved RTF only to 3.14 and
+raised peak RSS to about 2.68 GB because this implementation quantizes the
+official weights while loading them. Qwen is therefore functional but not a
+good continuous-reader choice on that older AVX2-only CPU. More recent
+AVX-512/VNNI, Apple Silicon, and GPU-equipped desktops should perform
+substantially better.
+
+Pre-quantized GGUF is a future alternative, not an interchangeable file for the
+current C companion. The promising low-storage reader configuration is the
+0.6B CustomVoice talker (fixed presets, no cloning model overhead) plus a
+separately quantized tokenizer. Existing GGUF runtimes offer roughly 860 MB
+Q4_K_M talker+tokenizer payloads; lower experimental combinations approach
+700 MB, but reported Q4 long-form failures make Q5/Q8 talker plus a smaller
+tokenizer the safer document-reading experiment. Any switch requires a second
+runtime integration and the same repetition, cancellation, and long-form tests
+used for the current backend.
 
 ## Configuration
 

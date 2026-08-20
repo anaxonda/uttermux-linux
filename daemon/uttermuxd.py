@@ -21,14 +21,15 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 from typing import Callable
 import urllib.error
 import urllib.request
 import wave
 
-for _common in (Path(__file__).resolve().parents[1] / "python", Path("/usr/lib/uttermux"),
-                Path("/usr/local/lib/uttermux")):
+for _common in reversed((Path(__file__).resolve().parents[1] / "python", Path("/usr/lib/uttermux"),
+                         Path("/usr/local/lib/uttermux"))):
     if (_common / "uttermux_profiles.py").is_file() and str(_common) not in sys.path:
         sys.path.insert(0, str(_common))
 try:
@@ -256,7 +257,22 @@ class SherpaEngine:
             audio = self.api.SherpaOnnxOfflineTtsGenerateWithConfig(
                 self.handle, text.encode("utf-8"), ctypes.byref(generation), callback, None)
             if audio:
-                self.api.SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio)
+                try:
+                    # Some engines (notably Pocket in sherpa-onnx 1.13.x)
+                    # return complete audio but never invoke the progress
+                    # callback. Forward that result only when no incremental
+                    # samples were emitted, otherwise it would repeat speech.
+                    result = audio.contents
+                    if not started and result.samples and result.n > 0 and not cancelled.is_set():
+                        emit(packet(AUDIO_START, 0, struct.pack("<IB", result.sample_rate, 1)))
+                        started = True
+                        raw = ctypes.string_at(result.samples, result.n * ctypes.sizeof(ctypes.c_float))
+                        max_payload = MAX_PACKET - HEADER.size
+                        for offset in range(0, len(raw), max_payload):
+                            if cancelled.is_set(): break
+                            emit(packet(AUDIO, 0, raw[offset:offset + max_payload]))
+                finally:
+                    self.api.SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio)
         if not started and not cancelled.is_set():
             emit(packet(AUDIO_START, 0, struct.pack("<IB", self.sample_rate, 1)))
 
@@ -433,6 +449,8 @@ class GrokProvider:
         except urllib.error.HTTPError as error:
             detail = error.read(2048).decode("utf-8", "replace")
             raise RuntimeError(f"Grok HTTP {error.code}: {detail}") from None
+
+
         voices = document.get("voices", document if isinstance(document, list) else [])
         self._voices = {}
         for voice in voices:
@@ -479,6 +497,105 @@ class GrokProvider:
         except urllib.error.HTTPError as error:
             detail = error.read(2048).decode("utf-8", "replace")
             raise RuntimeError(f"Grok HTTP {error.code}: {detail}") from None
+
+
+class QwenProvider:
+    """Persistent local Qwen3-TTS companion using its streaming HTTP API."""
+
+    SPEAKERS = ("ryan", "serena", "vivian", "uncle_fu", "aiden", "ono_anna",
+                "sohee", "eric", "dylan")
+    LANGUAGES = ("en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it")
+    LANGUAGE_NAMES = {"en": "English", "zh": "Chinese", "ja": "Japanese",
+                      "ko": "Korean", "de": "German", "fr": "French",
+                      "ru": "Russian", "pt": "Portuguese", "es": "Spanish",
+                      "it": "Italian"}
+
+    def __init__(self, config: dict):
+        data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "uttermux"
+        self.binary = Path(config.get("binary", Path.home() / ".local/lib/uttermux/qwen3-tts/qwen_tts"))
+        self.model = Path(config.get("model_dir", data / "models/qwen3-tts-0.6b"))
+        if not self.binary.is_file() or not os.access(self.binary, os.X_OK):
+            raise RuntimeError(f"Qwen runtime is not installed: {self.binary}")
+        if not (self.model / "model.safetensors").is_file():
+            raise RuntimeError(f"Qwen model is not installed: {self.model}")
+        self.port = int(config.get("port", 17872))
+        self.threads = max(1, int(config.get("threads", 4)))
+        self.quantization = str(config.get("quantization", "int8"))
+        self.process: subprocess.Popen | None = None
+        self.lock = threading.Lock()
+
+    def voices(self):
+        capabilities = tuple(normalize_language(item) for item in self.LANGUAGES)
+        for speaker in self.SPEAKERS:
+            yield (f"qwen/{speaker}", f"{speaker.replace('_', ' ').title()} · Qwen3-TTS",
+                   "en-US", "qwen", "Qwen3-TTS 0.6B", capabilities, True)
+
+    def _health(self) -> bool:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/v1/health", timeout=.5) as response:
+                return response.status == 200
+        except (OSError, urllib.error.URLError):
+            return False
+
+    def _ensure_server(self, cancelled: threading.Event) -> None:
+        with self.lock:
+            if self.process and self.process.poll() is None and self._health():
+                return
+            if self.process and self.process.poll() is None:
+                self.process.terminate()
+            command = [str(self.binary), "-d", str(self.model), "-j", str(self.threads)]
+            if self.quantization in {"int8", "int4"}:
+                command.append(f"--{self.quantization}")
+            command += ["--serve", str(self.port)]
+            self.process = subprocess.Popen(command, cwd=self.binary.parent,
+                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline and not cancelled.is_set():
+                if self.process.poll() is not None:
+                    raise RuntimeError(f"Qwen server failed to start (exit {self.process.returncode})")
+                if self._health():
+                    return
+                time.sleep(.25)
+            if cancelled.is_set():
+                self.process.terminate()
+                raise RuntimeError("Qwen startup cancelled")
+            raise RuntimeError("Qwen model did not become ready within 180 seconds")
+
+    def synthesize(self, voice_id: str, text: str, speed: float, emit,
+                   cancelled: threading.Event, language: str = ""):
+        self._ensure_server(cancelled)
+        speaker = voice_id.removeprefix("qwen/")
+        if speaker not in self.SPEAKERS:
+            raise ValueError(f"unknown Qwen voice: {voice_id}")
+        code = normalize_language(language).split("-", 1)[0]
+        body = {"text": text, "speaker": speaker,
+                "language": self.LANGUAGE_NAMES.get(code, "English"),
+                "rate": max(.5, min(2.0, speed))}
+        request = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/tts/stream",
+            data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"})
+        started = False
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                while not cancelled.is_set():
+                    chunk = response.read(32768)
+                    if not chunk:
+                        break
+                    if not started:
+                        emit(packet(AUDIO_START, 0, struct.pack("<IB", 24000, 2))); started = True
+                    emit(packet(AUDIO, 0, chunk))
+        except urllib.error.HTTPError as error:
+            detail = error.read(2048).decode("utf-8", "replace")
+            raise RuntimeError(f"Qwen HTTP {error.code}: {detail}") from None
+        finally:
+            # The companion is single-request. Closing the HTTP response does
+            # not interrupt its inference loop, so kill it on cancellation to
+            # make Speech Dispatcher's stop operation immediate.
+            if cancelled.is_set():
+                with self.lock:
+                    if self.process and self.process.poll() is None:
+                        self.process.terminate()
+        if not started and not cancelled.is_set():
+            raise RuntimeError("Qwen returned no audio")
 
 
 class Broker:
@@ -538,9 +655,9 @@ class Broker:
                     profile["language"], "local", model["id"], (profile["language"],), True)
         provider_config = self.config.get("providers", {})
         for provider_name, provider_type in (("edge", EdgeProvider), ("elevenlabs", ElevenLabsProvider),
-                                             ("grok", GrokProvider)):
+                                             ("grok", GrokProvider), ("qwen", QwenProvider)):
             cfg = provider_config.get(provider_name, {})
-            if not cfg.get("enabled", False):
+            if not cfg.get("enabled", provider_name == "qwen"):
                 continue
             try:
                 provider = provider_type(cfg)

@@ -79,7 +79,11 @@ def normalize_reference(source: Path, target: Path, max_seconds: int = 30) -> No
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     command = [
         "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
-        "-af", f"silenceremove=start_periods=1:start_threshold=-50dB:stop_periods=1:stop_threshold=-50dB,atrim=duration={max_seconds}",
+        # Trim the two ends independently. stop_periods=1 would terminate at
+        # the first ordinary pause inside a spoken reference.
+        "-af", ("silenceremove=start_periods=1:start_threshold=-50dB,"
+                "areverse,silenceremove=start_periods=1:start_threshold=-50dB,"
+                f"areverse,atrim=duration={max_seconds}"),
         "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(target),
     ]
     subprocess.run(command, check=True)

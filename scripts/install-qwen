@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime_commit=328ab9cb241774572bb59917af199bdf64a17227
+model_revision=85e237c12c027371202489a0ec509ded67b5e4b5
+data_root=${XDG_DATA_HOME:-"$HOME/.local/share"}/uttermux
+runtime_root="$data_root/runtimes/qwen3-tts"
+binary_root="$HOME/.local/lib/uttermux/qwen3-tts"
+model_root="$data_root/models/qwen3-tts-0.6b"
+
+if ! ldconfig -p 2>/dev/null | grep -q 'libopenblas\.so'; then
+    echo 'Qwen requires OpenBLAS. On Arch: sudo pacman -S --needed openblas' >&2
+    exit 2
+fi
+
+mkdir -p "$runtime_root" "$binary_root" "$model_root/speech_tokenizer"
+if [[ ! -d "$runtime_root/.git" ]]; then
+    git clone https://github.com/gabriele-mastrapasqua/qwen3-tts.git "$runtime_root"
+fi
+git -C "$runtime_root" fetch --depth 1 origin "$runtime_commit"
+git -C "$runtime_root" checkout --detach "$runtime_commit"
+make -C "$runtime_root" clean
+make -C "$runtime_root" blas -j"$(nproc)"
+install -m 755 "$runtime_root/qwen_tts" "$binary_root/qwen_tts"
+install -m 644 "$runtime_root/LICENSE" "$binary_root/LICENSE"
+
+base="https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice/resolve/$model_revision"
+files=(config.json generation_config.json merges.txt model.safetensors preprocessor_config.json tokenizer_config.json vocab.json)
+tokenizer_files=(config.json configuration.json model.safetensors preprocessor_config.json)
+for file in "${files[@]}"; do
+    [[ -s "$model_root/$file" ]] || curl --fail --location --retry 3 --output "$model_root/$file" "$base/$file"
+done
+for file in "${tokenizer_files[@]}"; do
+    [[ -s "$model_root/speech_tokenizer/$file" ]] || curl --fail --location --retry 3 \
+        --output "$model_root/speech_tokenizer/$file" "$base/speech_tokenizer/$file"
+done
+
+systemctl --user try-restart uttermux.service speech-dispatcher.service >/dev/null 2>&1 || true
+echo "Installed Qwen3-TTS 0.6B CustomVoice runtime and model."

@@ -46,6 +46,7 @@ install(PROGRAMS ui/uttermux-panel.py DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME
 install(PROGRAMS ui/uttermux-app.py DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME uttermux-app)
 install(PROGRAMS ui/uttermux-tray.py DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME uttermux-tray)
 install(PROGRAMS cli/sherpa-voice DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME model-manager)
+install(PROGRAMS scripts/install-qwen DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux)
 install(FILES python/uttermux_profiles.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux)
 install(FILES catalog/catalog.toml DESTINATION ${CMAKE_INSTALL_DATADIR}/uttermux)
 install(FILES config/uttermux.conf DESTINATION ${CMAKE_INSTALL_DATADIR}/speech-dispatcher/conf/modules)

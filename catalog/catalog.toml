@@ -3,11 +3,16 @@ schema_version = 1
 [[model]]
 id = "kokoro-multi-lang-v1_0"
 engine = "kokoro"
+family = "Kokoro"
 description = "Kokoro 82M multilingual model (English and Chinese, 53 speakers)"
 url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2"
 sha256 = "c133d26353d776da730870dac7da07dbfc9a5e3bc80cc5e8e83ab6e823be7046"
 size = 349418188
+estimated_ram_mb = 560
+quantization = "FP32"
+performance_class = "balanced"
 license = "Apache-2.0"
+source_url = "https://huggingface.co/hexgrad/Kokoro-82M"
 files = { model = "model.onnx", voices = "voices.bin", tokens = "tokens.txt", data_dir = "espeak-ng-data", lexicon = "lexicon-us-en.txt" }
 voices = [
   { id = "af-heart", name = "Kokoro Heart", language = "en-US", speaker_id = 3 },
@@ -21,11 +26,16 @@ voices = [
 [[model]]
 id = "kitten-nano-en-v0_8-int8"
 engine = "kitten"
+family = "Kitten"
 description = "Kitten Nano 0.8 English INT8 model optimized for CPU inference"
 url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_8-int8.tar.bz2"
 sha256 = "6fa5be852612ce761094ba74ee6123b4fc4acfefa79bf64dc63acae4a83af2fd"
 size = 31220690
+estimated_ram_mb = 180
+quantization = "INT8"
+performance_class = "fast"
 license = "Apache-2.0"
+source_url = "https://github.com/KittenML/KittenTTS"
 files = { model = "model.int8.onnx", voices = "voices.bin", tokens = "tokens.txt", data_dir = "espeak-ng-data" }
 voices = [
   { id = "expr-voice-2-m", name = "Kitten Voice 2 Male", language = "en-US", speaker_id = 0 },
@@ -41,33 +51,48 @@ voices = [
 [[model]]
 id = "kitten-nano-en-v0_1-fp16"
 engine = "kitten"
+family = "Kitten"
 description = "Kitten Nano English FP16 model"
 url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2"
 sha256 = "f35dac93754fe2ac97c66e1f468311d0d2130f7f0f5a89bfa1197e09a0cbdec5"
 size = 26855312
+estimated_ram_mb = 180
+quantization = "FP16"
+performance_class = "fast"
 license = "Apache-2.0"
+source_url = "https://github.com/KittenML/KittenTTS"
 files = { model = "model.fp16.onnx", voices = "voices.bin", tokens = "tokens.txt", data_dir = "espeak-ng-data" }
 voices = [{ id = "speaker-0", name = "Kitten Bella", language = "en-US", speaker_id = 0 }]
 
 [[model]]
 id = "vits-piper-en_US-lessac-medium"
 engine = "vits"
+family = "Piper"
 description = "Piper Lessac medium American English voice"
 url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2"
 sha256 = "9e3febfacf0abf4270172d2958bcec246032b7e88efc2720840cc80c93de334e"
 size = 67230653
+estimated_ram_mb = 180
+quantization = "FP32"
+performance_class = "fast"
 license = "MIT"
+source_url = "https://github.com/rhasspy/piper"
 files = { model = "en_US-lessac-medium.onnx", tokens = "tokens.txt", data_dir = "espeak-ng-data" }
 voices = [{ id = "lessac", name = "Piper Lessac", language = "en-US", speaker_id = 0 }]
 
 [[model]]
 id = "vits-inflect-en-nano-v2"
 engine = "vits"
+family = "Inflect"
 description = "Inflect Nano v2 compact English male voice"
 url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-inflect-en-nano-v2.tar.bz2"
 sha256 = "9a6b1188b5f3be8813e0552056328495b4e88ffd1ef18ff837272bde7b3bc136"
 size = 22429639
+estimated_ram_mb = 100
+quantization = "FP32"
+performance_class = "fast"
 license = "Apache-2.0"
+source_url = "https://huggingface.co/owensong/Inflect-Nano-v2"
 files = { model = "model.onnx", tokens = "tokens.txt", data_dir = "espeak-ng-data" }
 voices = [{ id = "default", name = "Inflect Nano", language = "en-US", speaker_id = 0 }]
 
@@ -162,3 +187,31 @@ languages = ["en-US", "zh-CN"]
 files = { tokens = "tokens.txt", encoder = "encoder.int8.onnx", decoder = "decoder.int8.onnx", vocoder = "vocos_24khz.onnx", data_dir = "espeak-ng-data", lexicon = "lexicon.txt" }
 assets = [{ file = "vocos_24khz.onnx", url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx", sha256 = "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0" }]
 voices = []
+
+[[model]]
+id = "qwen3-tts-0.6b-customvoice"
+engine = "qwen"
+external_installer = "install-qwen"
+family = "Qwen3-TTS"
+description = "Qwen3-TTS 0.6B multilingual CustomVoice companion runtime"
+url = "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+size = 2500000000
+estimated_ram_mb = 3000
+quantization = "INT8 runtime"
+performance_class = "heavy"
+license = "Apache-2.0"
+source_url = "https://github.com/QwenLM/Qwen3-TTS"
+capabilities = ["streaming", "multilingual", "style-control"]
+languages = ["en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"]
+files = {}
+voices = [
+  { id = "ryan", name = "Ryan", language = "en-US", speaker_id = 3061 },
+  { id = "serena", name = "Serena", language = "zh-CN", speaker_id = 3066 },
+  { id = "vivian", name = "Vivian", language = "zh-CN", speaker_id = 3065 },
+  { id = "uncle_fu", name = "Uncle Fu", language = "zh-CN", speaker_id = 3010 },
+  { id = "aiden", name = "Aiden", language = "en-US", speaker_id = 2861 },
+  { id = "ono_anna", name = "Ono Anna", language = "ja-JP", speaker_id = 2873 },
+  { id = "sohee", name = "Sohee", language = "ko-KR", speaker_id = 2864 },
+  { id = "eric", name = "Eric", language = "zh-CN", speaker_id = 2875 },
+  { id = "dylan", name = "Dylan", language = "zh-CN", speaker_id = 2878 },
+]

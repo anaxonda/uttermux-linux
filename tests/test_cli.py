@@ -47,7 +47,8 @@ class CliTests(unittest.TestCase):
             self.assertIn("kokoro-multi-lang-v1_0", catalog)
             self.assertEqual(catalog["kokoro-multi-lang-v1_0"]["voices"][0]["language"], "en-US")
             for item in catalog.values():
-                self.assertRegex(item["sha256"], r"^[0-9a-f]{64}$")
+                if not item.get("external_installer"):
+                    self.assertRegex(item["sha256"], r"^[0-9a-f]{64}$")
                 self.assertGreater(item["size"], 0)
                 for asset in item.get("assets", []):
                     self.assertRegex(asset["sha256"], r"^[0-9a-f]{64}$")
@@ -142,6 +143,18 @@ class CliTests(unittest.TestCase):
     def test_zipvoice_requires_exact_transcript(self):
         with self.assertRaisesRegex(ValueError, "exact transcript"):
             profiles.create_local("zipvoice", "Voice", "en-US", Path("missing.wav"))
+
+    def test_reference_normalization_preserves_internal_pauses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root / "paused.wav"; target = root / "normalized.wav"
+            with wave.open(str(source), "wb") as output:
+                output.setnchannels(1); output.setsampwidth(2); output.setframerate(24000)
+                output.writeframes(b"\0\x20" * 24000)
+                output.writeframes(b"\0\0" * 24000)
+                output.writeframes(b"\0\x20" * 24000)
+            profiles.normalize_reference(source, target)
+            with wave.open(str(target), "rb") as normalized:
+                self.assertGreater(normalized.getnframes() / normalized.getframerate(), 2.5)
 
 
 if __name__ == "__main__":

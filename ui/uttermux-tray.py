@@ -53,7 +53,7 @@ class Tray:
         self.loop = GLib.MainLoop(); self.connection = None; self.title = "UtterMux"
         self.name = f"org.kde.StatusNotifierItem-{os.getpid()}-1"
 
-    def properties(self, interface, name):
+    def properties(self, _connection, _sender, _path, interface, name):
         if interface == "org.kde.StatusNotifierItem":
             values = {"Category": GLib.Variant("s", "ApplicationStatus"), "Id": GLib.Variant("s", "uttermux"),
                 "Title": GLib.Variant("s", self.title), "Status": GLib.Variant("s", "Active"),
@@ -126,14 +126,19 @@ class Tray:
         menu_info = Gio.DBusNodeInfo.new_for_xml(MENU_XML).interfaces[0]
         connection.register_object(ITEM_PATH, item_info, self.item_method, self.properties, None)
         connection.register_object(MENU_PATH, menu_info, self.menu_method, self.properties, None)
+        self.refresh(); GLib.timeout_add_seconds(10, self.refresh)
+
+    def name_acquired(self, connection, _name):
+        # The watcher may resolve a well-known service immediately. Register only
+        # after D-Bus confirms that this process owns it, otherwise Waybar never
+        # receives the item even though the tray process remains healthy.
         connection.call("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher",
             "org.kde.StatusNotifierWatcher", "RegisterStatusNotifierItem", GLib.Variant("(s)", (self.name,)),
             None, Gio.DBusCallFlags.NONE, 5000, None, None, None)
-        self.refresh(); GLib.timeout_add_seconds(10, self.refresh)
 
     def run(self):
         Gio.bus_own_name(Gio.BusType.SESSION, self.name, Gio.BusNameOwnerFlags.NONE,
-                         self.bus_acquired, None, None)
+                         self.bus_acquired, self.name_acquired, None)
         self.loop.run()
 
 

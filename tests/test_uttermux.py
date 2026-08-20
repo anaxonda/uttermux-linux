@@ -1,4 +1,5 @@
 import importlib.util
+import ctypes
 import io
 import json
 from pathlib import Path
@@ -98,6 +99,35 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(body["language"], "auto")
         self.assertEqual(body["output_format"], {"codec": "pcm", "sample_rate": 24000})
         self.assertTrue(emitted)
+
+    def test_qwen_uses_streaming_local_endpoint_and_language(self):
+        provider = object.__new__(self.u.QwenProvider)
+        provider.port = 17872
+        provider._ensure_server = mock.Mock()
+        response = mock.MagicMock()
+        response.__enter__.return_value = io.BytesIO(b"\0\1" * 100)
+        emitted = []
+        with mock.patch.object(self.u.urllib.request, "urlopen", return_value=response) as open_url:
+            provider.synthesize("qwen/ryan", "Bonjour", 1.1, emitted.append,
+                                threading.Event(), "fr-FR")
+        body = json.loads(open_url.call_args.args[0].data)
+        self.assertEqual((body["speaker"], body["language"]), ("ryan", "French"))
+        self.assertTrue(emitted)
+
+    def test_sherpa_forwards_completed_audio_when_engine_does_not_stream(self):
+        samples = (ctypes.c_float * 3)(.25, -.5, .75)
+        generated = self.u.GeneratedAudio(samples, 3, 24000)
+        api = mock.MagicMock()
+        api.SherpaOnnxOfflineTtsGenerateWithConfig.return_value = ctypes.pointer(generated)
+        engine = object.__new__(self.u.SherpaEngine)
+        engine.api, engine.handle, engine.sample_rate = api, object(), 24000
+        engine.lock = threading.RLock()
+        emitted = []
+        engine.synthesize("hello", 0, 1.0, emitted.append, threading.Event())
+        kinds = [self.u.HEADER.unpack_from(raw)[2] for raw in emitted]
+        self.assertEqual(kinds, [self.u.AUDIO_START, self.u.AUDIO])
+        self.assertEqual(emitted[1][self.u.HEADER.size:], bytes(samples))
+        api.SherpaOnnxDestroyOfflineTtsGeneratedAudio.assert_called_once()
 
     def test_rejects_bad_protocol_version(self):
         raw = bytearray(self.u.packet(self.u.HEALTH, 1)); raw[4:6] = (99).to_bytes(2, "little")

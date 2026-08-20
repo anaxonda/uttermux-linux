@@ -163,9 +163,6 @@ def install_model(model_id: str, no_restart: bool = False) -> None:
         safe_extract(archive, temp)
         children = [p for p in temp.iterdir()]
         source = children[0] if len(children) == 1 and children[0].is_dir() else temp
-        for relative in item["files"].values():
-            if not (source / relative).exists():
-                raise RuntimeError(f"archive lacks required file: {relative}")
         for asset in item.get("assets", []):
             relative = Path(asset["file"])
             if relative.is_absolute() or ".." in relative.parts:
@@ -178,6 +175,12 @@ def install_model(model_id: str, no_restart: bool = False) -> None:
             if actual_asset != asset["sha256"]:
                 raise RuntimeError(f"SHA-256 mismatch for {model_id}/{relative}: "
                                    f"expected {asset['sha256']}, got {actual_asset}")
+        # Some required runtime files are separately verified assets rather than
+        # members of the primary model archive (for example ZipVoice's vocoder).
+        # Validate the complete assembled model only after fetching those assets.
+        for relative in item["files"].values():
+            if not (source / relative).exists():
+                raise RuntimeError(f"installation lacks required file: {relative}")
         if source == temp:
             os.replace(temp, final)
         else:

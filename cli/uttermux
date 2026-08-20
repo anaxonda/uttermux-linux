@@ -20,8 +20,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-for _common in (Path(__file__).resolve().parents[1] / "python", Path("/usr/lib/uttermux"),
-                Path("/usr/local/lib/uttermux")):
+for _common in reversed((Path(__file__).resolve().parents[1] / "python", Path("/usr/lib/uttermux"),
+                         Path("/usr/local/lib/uttermux"))):
     if (_common / "uttermux_profiles.py").is_file() and str(_common) not in sys.path:
         sys.path.insert(0, str(_common))
 try:
@@ -31,7 +31,7 @@ except ImportError:
 
 MAGIC, VERSION = 0x58544D55, 1
 HEADER = struct.Struct("<IHHQI")
-LIST_VOICES, VOICE, DONE, ERROR, HEALTH, STATUS, STATE = 2, 3, 7, 9, 10, 11, 12
+HELLO, LIST_VOICES, VOICE, SPEAK, AUDIO_START, AUDIO, DONE, STOP, ERROR, HEALTH, STATUS, STATE = range(1, 13)
 
 
 def config_dir() -> Path:
@@ -208,13 +208,18 @@ def profile_records() -> list[dict]:
 
 def cmd_catalog(_args):
     ready = {item["id"]: item for item in voice_records()}
+    installed_model_ids = {path.stem for directory in (
+        config_dir() / "models.d", config_dir().parent / "speech-dispatcher-sherpa/models.d")
+        if directory.is_dir() for path in directory.glob("*.toml")}
     models, catalog_voices = [], []
     for item in local_catalog():
         languages = item.get("languages") or sorted({voice.get("language", "und") for voice in item.get("voices", [])})
-        installed = any(record["model"] == item["id"] and record["provider"] == "local"
-                        for record in ready.values())
+        is_qwen = item["engine"] == "qwen"
+        installed = (any(record["provider"] == "qwen" for record in ready.values()) if is_qwen else
+                     item["id"] in installed_model_ids)
         models.append({
-            "id": item["id"], "providerId": "local", "library": item.get("family", item["engine"]),
+            "id": item["id"], "providerId": "qwen" if is_qwen else "local",
+            "library": item.get("family", item["engine"]),
             "version": item.get("version", "1"), "engine": item["engine"], "location": "on-device",
             "languages": languages, "capabilities": item.get("capabilities", []),
             "status": "ready" if installed else "downloadable",
@@ -225,21 +230,27 @@ def cmd_catalog(_args):
             "license": item.get("license", ""), "sourceUrl": item.get("source_url", item.get("url", "")),
         })
         for voice in item.get("voices", []):
-            voice_id = f"sherpa/{item['id']}/{voice['id']}"
+            voice_id = f"qwen/{voice['id']}" if is_qwen else f"sherpa/{item['id']}/{voice['id']}"
             catalog_voices.append({"id": voice_id, "modelId": item["id"],
                 "speakerId": str(voice.get("speaker_id", 0)), "name": voice["name"],
                 "languages": voice.get("languages", [voice.get("language", "und")]),
                 "gender": voice.get("gender", ""), "preview": "generated" if voice_id in ready else
                 ("sample" if voice.get("preview_url") else "unavailable"),
                 "previewUrl": voice.get("preview_url", ""), "ready": voice_id in ready})
-    provider_names = {"local": ("Local models", False, "free"), "edge": ("Microsoft Edge", True, "free"),
+    provider_names = {"local": ("Local models", False, "free"), "qwen": ("Qwen local", False, "free"),
+                      "edge": ("Microsoft Edge", True, "free"),
                       "elevenlabs": ("ElevenLabs", True, "subscription"), "grok": ("xAI", True, "metered")}
     providers = [{"id": key, "name": values[0], "network": values[1], "cost": values[2],
-                  "enabled": key == "local" or bool(read_config().get("providers", {}).get(key, {}).get("enabled"))}
+                  "enabled": key in {"local", "qwen"} or bool(read_config().get("providers", {}).get(key, {}).get("enabled"))}
                  for key, values in provider_names.items()]
     local_ids = {voice["id"] for voice in catalog_voices}
     for record in ready.values():
         if record["id"] in local_ids: continue
+        if record["provider"] == "qwen" and any(model["engine"] == "qwen" for model in models):
+            catalog_voices.append({"id": record["id"], "modelId": "qwen3-tts-0.6b-customvoice",
+                "speakerId": record["id"].split("/")[-1], "name": record["name"],
+                "languages": record["languages"], "preview": "generated", "ready": True})
+            continue
         if record["provider"] == "local" and any(model["id"] == record["model"] for model in models):
             catalog_voices.append({"id": record["id"], "modelId": record["model"],
                 "speakerId": record["id"].split("/")[-1], "name": record["name"],
@@ -248,10 +259,12 @@ def cmd_catalog(_args):
             continue
         model_id = f"{record['provider']}/{record['model']}"
         if not any(model["id"] == model_id for model in models):
+            local_companion = record["provider"] == "qwen"
             models.append({"id": model_id, "providerId": record["provider"], "library": record["model"],
-                "version": "service", "engine": record["provider"], "location": "cloud",
+                "version": "companion" if local_companion else "service", "engine": record["provider"],
+                "location": "on-device" if local_companion else "cloud",
                 "languages": record["languages"], "capabilities": ["streaming"], "status": "ready",
-                "performanceClass": "cloud"})
+                "performanceClass": "heavy" if local_companion else "cloud"})
         catalog_voices.append({"id": record["id"], "modelId": model_id, "speakerId": record["id"].split("/")[-1],
             "name": record["name"], "languages": record["languages"], "preview": "generated", "ready": True})
     print(json.dumps({"schemaVersion": 1, "providers": providers, "models": models,
@@ -310,6 +323,7 @@ def cmd_profile_rename(args):
 
 def cmd_settings_schema(_args):
     root = config_dir() / "credentials"
+    document = read_config(); routing = document.get("routing", {})
     providers = [
         {"id": "edge", "name": "Microsoft Edge", "fields": []},
         {"id": "elevenlabs", "name": "ElevenLabs", "fields": [
@@ -318,9 +332,12 @@ def cmd_settings_schema(_args):
             {"id": "apiKey", "type": "secret-file", "path": str(root / "grok-key"), "required": True}]},
     ]
     print(json.dumps({"schemaVersion": 1, "providers": providers, "playback": {
-        "maxLoadedModels": {"type": "integer", "minimum": 1, "maximum": 8, "default": 2},
-        "audioCacheMb": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64},
-        "autoDetectLanguage": {"type": "boolean", "default": True}}}, indent=2))
+        "maxLoadedModels": {"type": "integer", "minimum": 1, "maximum": 8, "default": 2,
+                            "value": int(document.get("max_loaded_models", 2))},
+        "audioCacheMb": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64,
+                         "value": int(document.get("audio_cache_mb", 64))},
+        "autoDetectLanguage": {"type": "boolean", "default": True,
+                               "value": bool(routing.get("auto_detect", True))}}}, indent=2))
 
 
 def cmd_voices(args):
@@ -511,6 +528,20 @@ def cmd_provider_default(args):
     atomic_write(config_path(), render_config(doc)); restart()
 
 
+def cmd_setting(args):
+    doc = read_config()
+    if args.name == "max-loaded-models":
+        doc["max_loaded_models"] = max(1, min(8, int(args.value)))
+    elif args.name == "audio-cache-mb":
+        doc["audio_cache_mb"] = max(0, min(1024, int(args.value)))
+    elif args.name == "auto-detect-language":
+        value = args.value.casefold()
+        if value not in {"true", "false", "1", "0", "yes", "no"}:
+            raise RuntimeError("auto-detect-language expects true or false")
+        doc.setdefault("routing", {})["auto_detect"] = value in {"true", "1", "yes"}
+    atomic_write(config_path(), render_config(doc)); restart()
+
+
 def cmd_edge_locales(args):
     doc = read_config(); edge = doc.setdefault("providers", {}).setdefault("edge", {})
     edge["locales"] = args.locales
@@ -526,6 +557,13 @@ def cmd_eleven_voice(args):
 
 
 def cmd_model(args):
+    if args.model_id == "qwen3-tts-0.6b-customvoice":
+        if args.action != "install":
+            raise RuntimeError("Qwen removal is not automated yet; profiles and model data are preserved")
+        installer = Path("/usr/lib/uttermux/install-qwen")
+        if not installer.exists(): installer = Path(__file__).resolve().parents[1] / "scripts/install-qwen"
+        subprocess.run([str(installer)], check=True)
+        return
     manager = Path("/usr/lib/uttermux/model-manager")
     if not manager.exists(): manager = Path(__file__).with_name("sherpa-voice")
     command = [str(manager), "model", args.action]
@@ -536,9 +574,40 @@ def cmd_model(args):
 def cmd_preview(args):
     record = next((record for record in voice_records() if record["id"] == args.voice or record["name"] == args.voice), None)
     if not record: raise RuntimeError(f"unknown voice: {args.voice}")
-    command = ["spd-say", "-o", "uttermux", "-y", record["name"]]
-    if args.language: command += ["-l", args.language]
-    subprocess.run(command + ["-w", args.text], check=True)
+    # A manager preview already has the canonical voice ID. Sending its display
+    # name back through Speech Dispatcher made the module resolve it a second
+    # time and was especially unreliable for reference-conditioned Pocket
+    # voices. Stream this exact broker request straight to the desktop sink.
+    language = args.language or record.get("native_language", "")
+    payload = b"\0".join(value.encode("utf-8") for value in
+                         (record["id"], "1.0", args.text, language)) + b"\0"
+    playback = None
+    try:
+        for kind, raw in transact(SPEAK, payload):
+            if kind == AUDIO_START:
+                if len(raw) < 5: raise RuntimeError("invalid audio header from broker")
+                sample_rate, channels = struct.unpack_from("<IB", raw)
+                player = (["paplay", "--raw", "--format=float32le", f"--rate={sample_rate}",
+                           f"--channels={channels}"] if GLib_find_program("paplay") else
+                          ["pw-play", "--format", "f32", "--rate", str(sample_rate),
+                           "--channels", str(channels), "-"])
+                playback = subprocess.Popen(player, stdin=subprocess.PIPE)
+            elif kind == AUDIO:
+                if not playback or not playback.stdin:
+                    raise RuntimeError("broker sent samples before an audio header")
+                playback.stdin.write(raw)
+        if not playback or not playback.stdin:
+            raise RuntimeError("broker returned no audio")
+        playback.stdin.close()
+        if playback.wait(): raise RuntimeError("audio playback failed")
+    finally:
+        if playback and playback.poll() is None:
+            playback.terminate()
+
+
+def GLib_find_program(name: str) -> str | None:
+    """Avoid importing GTK's GLib into the command-line client."""
+    return shutil.which(name)
 
 
 def cmd_preview_url(args):
@@ -674,6 +743,7 @@ def main():
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
     p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.set_defaults(func=cmd_provider)
     p = sub.add_parser("provider-default"); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
+    p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb", "auto-detect-language")); p.add_argument("value"); p.set_defaults(func=cmd_setting)
     p = sub.add_parser("edge-locales"); p.add_argument("locales", nargs="+"); p.set_defaults(func=cmd_edge_locales)
     p = sub.add_parser("elevenlabs-key"); p.add_argument("key"); p.set_defaults(func=cmd_key)
     p = sub.add_parser("credential-set"); p.add_argument("provider", choices=("elevenlabs", "grok")); p.set_defaults(func=cmd_credential_set)
