@@ -199,12 +199,13 @@ The installer pins both the native runtime and official model revisions. It
 builds the AVX2/ARM-appropriate executable under the user's data directory and
 keeps the model loaded in a local streaming companion after first use. On the
 project's i7-8650U reference desktop, direct cold INT8 synthesis used about
-1.84 GB RSS and measured RTF 3.42. Runtime INT4 improved RTF only to 3.14 and
-raised peak RSS to about 2.68 GB because this implementation quantizes the
-official weights while loading them. Qwen is therefore functional but not a
-good continuous-reader choice on that older AVX2-only CPU. More recent
-AVX-512/VNNI, Apple Silicon, and GPU-equipped desktops should perform
-substantially better.
+1.84 GB RSS and measured RTF 3.42. The runtime's current help restricts INT4
+to the 1.7B model, so earlier 0.6B `--int4` timings are not treated as valid
+quantization results. Qwen is therefore functional but not a good
+continuous-reader choice on that older AVX2-only CPU. More recent AVX-512/VNNI,
+Apple Silicon, and GPU-equipped desktops should perform substantially better.
+See [the Qwen benchmark notes](docs/qwen-benchmarks.md) for the thread, GGUF,
+streaming, and Intel Vulkan results.
 
 Pre-quantized GGUF is a future alternative, not an interchangeable file for the
 current C companion. The promising low-storage reader configuration is the
