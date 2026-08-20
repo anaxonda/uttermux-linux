@@ -13,7 +13,7 @@ jobs:
       - name: Install dependencies
         run: >-
           pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf python
-          speech-dispatcher rubberband onnxruntime-cpu
+          speech-dispatcher rubberband onnxruntime-cpu ffmpeg
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
@@ -46,7 +46,7 @@ jobs:
         run: >-
           apt-get install -y --no-install-recommends git ca-certificates cmake ninja-build
           g++ pkg-config python3 libspeechd-dev libspeechd-module0
-          librubberband-dev
+          librubberband-dev ffmpeg
       - uses: actions/checkout@v4
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build
