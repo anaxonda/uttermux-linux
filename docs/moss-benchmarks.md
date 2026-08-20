@@ -53,10 +53,28 @@ The upstream long-text path also deliberately inserts 240 or 400 ms of silence
 between model-created chunks. Those pauses must not be stacked with application
 or UtterMux sentence boundaries.
 
+### Parallel pipeline follow-up
+
+The upstream callback performs codec decoding synchronously inside the token
+generation loop. Moving frames through a queue to a separate decoder worker
+changes the result significantly. With two ONNX intra-op threads and independent
+generation/decoder workers:
+
+| Decode batch | First PCM | RTF |
+| ---: | ---: | ---: |
+| 4 frames | 0.66 s | 0.86 |
+| 8 frames | 0.91 s | 0.87 |
+| 12 frames | 1.21 s | 0.85 |
+
+Using four intra-op threads in both concurrent stages oversubscribed this
+four-core/eight-thread CPU and regressed to RTF 1.18–1.27. Two threads per stage
+is the appropriate starting point on this machine.
+
 ## Decision
 
-Keep MOSS out of the selectable catalog for now. Reconsider it on a faster CPU
-or GPU, or after an optimized/quantized runtime demonstrates sustained RTF well
-below 1.0 with incremental decoding. Acceptance still requires continuous
-KOReader/Librera/Firefox playback, immediate cancellation, and no audible chunk
-seams.
+Keep MOSS out of the selectable catalog until the parallel producer/decoder
+adapter is integrated. The model is fast enough on the reference CPU when the
+two stages do not serialize, but the prototype still needs bounded buffering,
+cancellation, adaptive startup reserve, and removal of upstream's artificial
+inter-chunk silence. Acceptance requires continuous KOReader/Librera/Firefox
+playback and no audible chunk seams.

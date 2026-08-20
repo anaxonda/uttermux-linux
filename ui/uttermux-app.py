@@ -38,7 +38,23 @@ def saved_state() -> dict:
 
 def save_state(document: dict) -> None:
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    current = saved_state()
+    current.update(document)
+    STATE.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+
+
+LANGUAGE_NAMES = {
+    "ar": "Arabic", "de": "German", "en": "English", "es": "Spanish",
+    "fr": "French", "hi": "Hindi", "it": "Italian", "ja": "Japanese",
+    "ko": "Korean", "nl": "Dutch", "pl": "Polish", "pt": "Portuguese",
+    "ru": "Russian", "tr": "Turkish", "uk": "Ukrainian", "vi": "Vietnamese",
+    "zh": "Chinese",
+}
+
+
+def language_label(tag: str) -> str:
+    base = tag.split("-", 1)[0].casefold()
+    return f"{LANGUAGE_NAMES.get(base, tag)} ({tag})"
 
 
 class VoicePage(Gtk.Box):
@@ -48,23 +64,17 @@ class VoicePage(Gtk.Box):
         self.loading_filters = False
         self.set_margin_top(16); self.set_margin_bottom(16); self.set_margin_start(16); self.set_margin_end(16)
         self.active = Gtk.Label(xalign=0, wrap=True); self.active.add_css_class("title-3"); self.append(self.active)
-        self.filters, self.filter_state = {}, saved_state().get("filters", {})
-        grid = Gtk.Grid(column_spacing=8, row_spacing=6); self.append(grid)
-        for index, (key, label, placeholder) in enumerate((
-            ("voice", "Voice", "Search voice name"), ("language", "Language", "e.g. French or fr"),
-            ("provider", "Provider", "e.g. Local, Edge, ElevenLabs"),
-            ("model", "Model family", "e.g. Pocket, Kokoro, Qwen"))):
-            column, base_row = index % 2, (index // 2) * 2
-            grid.attach(Gtk.Label(label=label, xalign=0), column, base_row, 1, 1)
-            entry = Gtk.SearchEntry(placeholder_text=placeholder, hexpand=True)
-            entry.set_text(self.filter_state.get(key, "")); entry.connect("search-changed", self.filter_changed)
-            grid.attach(entry, column, base_row + 1, 1, 1); self.filters[key] = entry
+        self.filter_state = saved_state().get("filters", {})
+        self.search = Gtk.SearchEntry(placeholder_text="Search voices", hexpand=True)
+        self.search.set_text(self.filter_state.get("query", self.filter_state.get("voice", "")))
+        self.search.connect("search-changed", self.filter_changed); self.append(self.search)
         choice_grid = Gtk.Grid(column_spacing=8, row_spacing=4); self.append(choice_grid)
         self.exact_filters = {}
-        for column, (key, label, initial) in enumerate((("provider", "Provider", "All providers"),
-                ("language", "Language", "All languages"), ("family", "Model family", "All model families"))):
+        self.exact_values = {}
+        for column, (key, label, initial) in enumerate((("language", "Language", "All languages"),
+                ("provider", "Provider", "All providers"), ("model", "Model", "All models"))):
             choice_grid.attach(Gtk.Label(label=label, xalign=0), column, 0, 1, 1)
-            dropdown = Gtk.DropDown(model=Gtk.StringList.new([initial]), hexpand=True)
+            dropdown = Gtk.DropDown(model=Gtk.StringList.new([initial]), hexpand=True, enable_search=True)
             dropdown.connect("notify::selected", self.filter_changed)
             choice_grid.attach(dropdown, column, 1, 1, 1); self.exact_filters[key] = dropdown
         row = Gtk.Box(spacing=8); self.append(row)
@@ -117,61 +127,64 @@ class VoicePage(Gtk.Box):
         self.rebuild(); return GLib.SOURCE_REMOVE
 
     def clear(self, *_args):
-        for entry in self.filters.values(): entry.set_text("")
+        self.search.set_text("")
         for dropdown in self.exact_filters.values(): dropdown.set_selected(0)
         for dropdown in (self.location, self.readiness, self.performance, self.sorting): dropdown.set_selected(0)
         self.rebuild()
 
     def filter_changed(self, *_args):
         if self.loading_filters: return
-        filters = {key: entry.get_text() for key, entry in self.filters.items()}
-        filters.update({f"exact_{key}": self.dropdown_text(widget) for key, widget in self.exact_filters.items()})
+        filters = {"query": self.search.get_text()}
+        filters.update({f"exact_{key}": self.dropdown_value(key) for key in self.exact_filters})
         filters.update({"location_index": self.location.get_selected(), "readiness_index": self.readiness.get_selected(),
                         "performance_index": self.performance.get_selected(), "sorting_index": self.sorting.get_selected()})
         self.filter_state = filters
         save_state({"filters": filters})
         self.rebuild()
 
-    @staticmethod
-    def dropdown_text(dropdown):
-        item = dropdown.get_selected_item()
-        return item.get_string() if item else ""
-
     def populate_exact_filters(self):
         self.loading_filters = True
         models = {item["id"]: item for item in self.document.get("models", [])}
-        values = {
-            "provider": sorted({self.provider_names.get(models.get(item.get("modelId"), {}).get("providerId", "local"),
-                                                        models.get(item.get("modelId"), {}).get("providerId", "local"))
-                                for item in self.records}),
-            "language": sorted({language for item in self.records for language in item.get("languages", [])}),
-            "family": sorted({models.get(item.get("modelId"), {}).get("library", "") for item in self.records if models.get(item.get("modelId"), {}).get("library")}),
-        }
-        labels = {"provider": "All providers", "language": "All languages", "family": "All model families"}
+        provider_ids = sorted({models.get(item.get("modelId"), {}).get("providerId", "local") for item in self.records},
+                              key=lambda value: self.provider_names.get(value, value).casefold())
+        language_tags = sorted({language for item in self.records for language in item.get("languages", [])})
+        model_names = sorted({models.get(item.get("modelId"), {}).get("library", "") for item in self.records
+                              if models.get(item.get("modelId"), {}).get("library")}, key=str.casefold)
+        values = {"provider": provider_ids, "language": language_tags, "model": model_names}
+        displays = {"provider": [self.provider_names.get(value, value) for value in provider_ids],
+                    "language": [language_label(value) for value in language_tags], "model": model_names}
+        labels = {"provider": "All providers", "language": "All languages", "model": "All models"}
         for key, dropdown in self.exact_filters.items():
-            wanted = self.filter_state.get(f"exact_{key}", labels[key])
-            options = [labels[key], *values[key]]; dropdown.set_model(Gtk.StringList.new(options))
-            dropdown.set_selected(options.index(wanted) if wanted in options else 0)
+            wanted = self.filter_state.get(f"exact_{key}", "")
+            self.exact_values[key] = ["", *values[key]]
+            dropdown.set_model(Gtk.StringList.new([labels[key], *displays[key]]))
+            dropdown.set_selected(self.exact_values[key].index(wanted) if wanted in self.exact_values[key] else 0)
         for key, widget in (("location_index", self.location), ("readiness_index", self.readiness),
                             ("performance_index", self.performance), ("sorting_index", self.sorting)):
             widget.set_selected(int(self.filter_state.get(key, 0)))
         self.loading_filters = False
 
+    def dropdown_value(self, key):
+        values = self.exact_values.get(key, [""])
+        selected = self.exact_filters[key].get_selected()
+        return values[selected] if selected < len(values) else ""
+
     def rebuild(self):
         while child := self.listbox.get_first_child(): self.listbox.remove(child)
-        terms = {key: entry.get_text().casefold().split() for key, entry in self.filters.items()}
+        terms = self.search.get_text().casefold().split()
         result = []
         for record in self.records:
             model = record.get("model", {}); provider = model.get("providerId", "local")
             provider_label = self.provider_names.get(provider, provider)
-            fields = {"voice": record.get("name", ""), "language": " ".join(record.get("languages", [])),
-                      "provider": provider + " " + provider_label + " " + model.get("engine", ""),
-                      "model": record.get("modelId", "") + " " + model.get("library", "")}
-            if any(not all(term in fields[key].casefold() for term in wanted) for key, wanted in terms.items()): continue
-            exact = {key: self.dropdown_text(widget) for key, widget in self.exact_filters.items()}
-            if exact["provider"] != "All providers" and provider_label != exact["provider"]: continue
-            if exact["language"] != "All languages" and exact["language"] not in record.get("languages", []): continue
-            if exact["family"] != "All model families" and model.get("library", "") != exact["family"]: continue
+            languages = record.get("languages", [])
+            searchable = " ".join((record.get("name", ""), record.get("id", ""), provider, provider_label,
+                model.get("engine", ""), record.get("modelId", ""), model.get("library", ""),
+                " ".join(languages), " ".join(language_label(value) for value in languages))).casefold()
+            if not all(term in searchable for term in terms): continue
+            exact = {key: self.dropdown_value(key) for key in self.exact_filters}
+            if exact["provider"] and provider != exact["provider"]: continue
+            if exact["language"] and exact["language"] not in languages: continue
+            if exact["model"] and model.get("library", "") != exact["model"]: continue
             online = model.get("location") == "cloud"
             if self.location.get_selected() == 1 and online: continue
             if self.location.get_selected() == 2 and not online: continue

@@ -1,306 +1,284 @@
 # UtterMux
 
-UtterMux is a provider-neutral Linux text-to-speech stack. Firefox Reader View,
-Zotero Read Aloud, `spd-say`, and desktop selection shortcuts all see one
-Speech Dispatcher module while a socket-activated broker owns local models and
-online connections.
+Use local and online text-to-speech voices everywhere on Linux.
 
-The Android application is maintained separately but shares the versioned
-catalog vocabulary in [`docs/interop/catalog-v1.schema.json`](docs/interop/catalog-v1.schema.json).
-The desktop migration contract and planned Voices/Create/Settings parity are
-documented in [`docs/DESKTOP_PARITY.md`](docs/DESKTOP_PARITY.md); Speech
-Dispatcher remains the Linux compatibility boundary.
+UtterMux makes one voice catalog available to Firefox Reader View, Zotero Read
+Aloud, Speech Dispatcher applications, KOReader, and a desktop shortcut for
+speaking selected text. Local models stay loaded in a background broker, while
+online providers use the same voice selection and language-routing rules.
+
+> **Project status:** active development. The Linux desktop stack works on the
+> project's Arch Linux test system, but packaging and cross-distribution testing
+> are not finished. No voice model is bundled; users choose what to download.
+
+## Why UtterMux?
+
+Linux TTS tools usually support one engine or one application. UtterMux keeps
+Speech Dispatcher as the compatibility layer and puts model management,
+provider credentials, automatic language routing, cloning, caching, and
+cancellation behind it.
 
 ```text
-Firefox / Zotero / spd-say / selection shortcut
-                      |
-              Speech Dispatcher
-                      |
-                 sd_uttermux
-                      |
-                 uttermuxd
-             /          |          \
- sherpa-onnx local   Microsoft Edge   ElevenLabs / xAI
- Kokoro/Kitten/      online voices    subscriptions
- Piper/Inflect/
- Matcha/Supertonic/Pocket
+Firefox · Zotero · spd-say · KOReader · selection shortcut
+                            │
+                    Speech Dispatcher
+                            │
+                       sd_uttermux
+                            │
+                        uttermuxd
+             ┌──────────────┼──────────────┐
+        local ONNX       free network     paid APIs
+   Piper/Kokoro/etc.        Edge        ElevenLabs/xAI
 ```
 
-The module reports `END` only after it has submitted all audio for that client
-utterance. This deliberately preserves Zotero's sentence highlighting instead
-of hiding provider latency with cross-utterance read-ahead. Models are loaded
-lazily and retained in a two-entry LRU by default. Online audio has a bounded,
-memory-only cache and falls back to a configured local voice only if a request
-fails before playback begins.
+The GTK application has the same three top-level areas as the Android app:
 
-## Build and migrate
+- **Voices** — search, filter, download, preview, and choose a default voice.
+- **Create voice** — create and manage Pocket, ZipVoice, or ElevenLabs clones.
+- **Settings** — configure providers, routing, model caching, and diagnostics.
 
-Arch dependencies:
+The application is optional. Every operation also has a CLI equivalent.
+
+## Features
+
+- Native Firefox Web Speech API and Zotero Read Aloud integration through
+  Speech Dispatcher.
+- Persistent local models, bounded LRU model caching, and optional startup
+  preload for the active voice.
+- Local and cloud voices in one searchable catalog.
+- BCP-47 language metadata, automatic language detection, per-language routes,
+  and configurable fallback order.
+- System-wide selected-text reading on Wayland and X11.
+- Voice preview and local model downloads.
+- Pocket and ZipVoice local cloning plus ElevenLabs Instant Voice Cloning.
+- Tray icon that opens the normal application.
+- Compatibility bridge for the existing KOReader localhost TTS plugin.
+- Cancellation without changing voices halfway through an utterance.
+
+## Supported voices
+
+No model is downloaded automatically.
+
+| Engine or provider | Runs | Status | Cloning | Typical model download | Notes |
+| --- | --- | --- | --- | ---: | --- |
+| Piper / VITS | Locally | Supported | No | 20–150 MB | Fast, dependable baseline |
+| Inflect Nano v2 | Locally | Supported | No | 21 MB | Very small English voice |
+| Kitten Nano INT8 | Locally | Supported | No | 30 MB | Eight English speakers |
+| Kokoro 82M FP32 | Locally | Supported | No | 333 MB | Higher quality; preload recommended |
+| Matcha | Locally | Downloadable | No | 77 MB | Uses a separate vocoder |
+| Supertonic 3 INT8 | Locally | Downloadable | No | 129 MB | Multilingual styles |
+| Pocket INT8 | Locally | Supported | Yes | 176 MB | Presets or a reference recording |
+| ZipVoice Distill INT8 | Locally | Supported | Yes | 156 MB | English/Chinese; exact transcript required |
+| Qwen3-TTS 0.6B CustomVoice | Local companion | Optional | Planned | ~2.4 GB | Intended for newer/faster systems |
+| Microsoft Edge | Online | Supported | No | — | Free unofficial consumer endpoint |
+| ElevenLabs | Online | Supported | Yes | — | Subscription and API key required |
+| xAI / Grok | Online | Supported | Provider managed | — | Multilingual automatic-language mode |
+
+Azure, Google, AWS, OpenAI, Deepgram, Cartesia, PlayHT, and Resemble have
+catalog/provider scaffolding but are not advertised as working until each has
+passed credentialed end-to-end tests.
+
+MOSS-TTS-Nano is being reevaluated against its April 2026 ONNX release. A
+parallel two-stage benchmark reached RTF 0.86 and first PCM in 0.66 seconds on
+the i7-8650U test system; production support still needs a cancellable streaming
+adapter and reader testing. See [MOSS benchmark notes](docs/moss-benchmarks.md).
+
+Qwen works but is too slow for continuous reading on the older i7-8650U
+reference laptop. Faster CPUs and supported GPUs can run it at or above real
+time. See [Qwen benchmark notes](docs/qwen-benchmarks.md).
+
+## Install on Arch Linux
+
+Install build and runtime dependencies:
 
 ```sh
-sudo pacman -S --needed speech-dispatcher libspeechd rubberband \
-  onnxruntime-cpu cmake ninja gcc git pkgconf python curl ffmpeg \
+sudo pacman -S --needed \
+  speech-dispatcher libspeechd rubberband onnxruntime-cpu \
+  cmake ninja gcc git pkgconf python curl ffmpeg \
   python-gobject gtk4 python-numpy python-aiohttp python-certifi
 ```
 
-Build sherpa-onnx **1.13.6 or newer** with its TTS C API, then UtterMux:
+UtterMux currently requires sherpa-onnx 1.13.6 or newer built with its TTS C
+API. Once `libsherpa-onnx-c-api.so` is installed, build UtterMux:
 
 ```sh
+cd uttermux
 cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build --output-on-failure
 sudo cmake --install build
+sudo ldconfig
 uttermux setup
 ```
 
-`uttermux setup` copies existing `speech-dispatcher-sherpa` manifests without
-altering their model paths, installs a small managed Speech Dispatcher block,
-and enables `uttermux.socket`. It does not delete the old configuration. Once
-the new module is verified, old `sd_sherpa` files can be removed separately.
+Clone or download this repository first, then run the commands from its root.
+`uttermux setup` configures the Speech Dispatcher module and enables the
+socket-activated broker and tray user services. Existing model paths are
+migrated without deleting the old configuration.
 
-## CLI
+Run a health check:
 
 ```sh
-uttermux setup
 uttermux doctor
-uttermux catalog --json
-uttermux status --json
-uttermux profiles --json
-uttermux settings-schema --json
+spd-say 'UtterMux is ready.'
+```
+
+Restart Firefox and Zotero after first installation so they enumerate the new
+system voices.
+
+## Everyday use
+
+Open the manager from the application menu or run:
+
+```sh
+uttermux-app
+```
+
+Useful CLI commands:
+
+```sh
 uttermux voices
-uttermux voices --language fr --provider elevenlabs
-uttermux discover --provider elevenlabs --language fr --search narrator
-uttermux default sherpa/vits-piper-en_US-lessac-medium/lessac
-uttermux default --language fr elevenlabs/VOICE_ID
-uttermux provider-default elevenlabs elevenlabs/VOICE_ID
-uttermux routes
-uttermux detect 'Ceci est un paragraphe français suffisamment long.'
-uttermux preview sherpa/vits-inflect-en-nano-v2/default
-uttermux speak-selection              # primary selection
-uttermux speak-selection --clipboard
+uttermux status --json
 uttermux model list
 uttermux model install vits-inflect-en-nano-v2
+uttermux preview sherpa/vits-inflect-en-nano-v2/default
+uttermux default sherpa/vits-inflect-en-nano-v2/default
+uttermux speak-selection
+uttermux speak-selection --clipboard
+uttermux doctor
 ```
 
-Bind `uttermux speak-selection` to a desktop shortcut. It uses `wl-paste`,
-`xclip`, or `xsel`, whichever is available.
+Bind `uttermux speak-selection` to a desktop shortcut. It reads the current
+primary selection using `wl-paste`, `xclip`, or `xsel`. The tray menu can also
+read the selection or stop current speech.
 
-`uttermux-app` is the normal GTK4 management window. Its Voices page has
-independent searches for voice, language, service/runtime, and model, plus
-offline/online, readiness, performance, size, and RAM controls. Create manages
-local and ElevenLabs clones; Settings keeps provider credentials and advanced
-controls out of the voice browser. Filters persist across window closes.
+For slower-loading local models such as Kokoro, enable **Settings → Advanced →
+Preload active local voice**. This spends RAM at login but removes model loading
+from the first request. It cannot remove the time the model needs to synthesize
+the first sentence.
 
-`uttermux-tray` is a session StatusNotifierItem. A normal click opens or focuses
-the application; its menu also reads the current selection, stops speech, or
-quits only the tray process. `uttermux setup` enables its user service. Remove
-the old `custom/tts` module from Waybar and retain Waybar's standard `tray`
-module.
+## Language routing
 
-Enable Edge for selected locales:
+Applications may declare a language. Otherwise, UtterMux detects sufficiently
+long text and tries:
+
+1. the selected global voice when it supports that language;
+2. the exact and base-language routes configured by the user;
+3. enabled providers in the configured order;
+4. the cross-language fallback, if enabled.
+
+Short or uncertain text uses the configured default language. Language tags are
+always normalized to BCP-47 form such as `en-US` and `fr-FR`.
+
+Examples:
 
 ```sh
-uttermux edge-locales en-US en-GB
+uttermux default --language fr elevenlabs/VOICE_ID
+uttermux detect 'Ceci est un paragraphe français suffisamment long.'
+uttermux routes
+```
+
+## Online providers
+
+Providers and credentials can be configured in the GTK Settings page. Keys are
+stored in mode-0600 files rather than the main configuration or process command
+line.
+
+```sh
+# ElevenLabs
+printf '%s\n' 'YOUR_API_KEY' | uttermux credential-set elevenlabs
+uttermux provider enable elevenlabs
+
+# xAI / Grok
+printf '%s\n' 'YOUR_API_KEY' | uttermux credential-set grok
+uttermux provider enable grok
+
+# Edge locales exposed to desktop applications
+uttermux edge-locales en-US en-GB fr-FR
 uttermux provider enable edge
 ```
 
-Configure ElevenLabs without placing the API key in the main config or process
-arguments (the GTK Settings page uses the same stdin command):
-
-```sh
-printf '%s\n' 'YOUR_API_KEY' | uttermux credential-set elevenlabs
-uttermux elevenlabs-voice VOICE_ID 'Display Name' en-US
-uttermux provider enable elevenlabs
-```
-
-The key is stored mode 0600 under
-`~/.config/uttermux/credentials/elevenlabs-api-key`. UtterMux uses ElevenLabs'
-streaming 24 kHz PCM endpoint and defaults to `eleven_flash_v2_5`. A voice's
-native accent is separate from its model's language capabilities, so a voice
-such as Bill can be assigned to French without creating a duplicate Firefox
-voice entry.
-
-Configure xAI/Grok by saving the API key at
-`~/.config/uttermux/credentials/grok-key` (mode 0600), then run:
-
-```sh
-uttermux provider enable grok
-```
-
-UtterMux discovers the current built-in Grok voice roster at broker startup.
-Grok voices are multilingual and use the provider's `language=auto` mode by
-default, including language changes within one request. Set
-`automatic_language = false` under `[providers.grok]` to send the language
-chosen by UtterMux routing instead.
+Edge uses an unofficial endpoint that may change upstream. Paid-provider use can
+incur charges; UtterMux does not manage quotas or billing.
 
 ## Voice cloning
 
-Cloned voices are catalog voices: they can become the global default, appear in
-Firefox and Zotero through Speech Dispatcher, participate in language routes,
-and are available to the selection shortcut and KOReader bridge.
+Only clone a voice when you have the necessary rights and consent.
 
 ```sh
-# Pocket: reference audio only (English, one to ten useful seconds)
+# Pocket: one to ten useful seconds of reference audio
 uttermux profile-create pocket --name 'My reader' --language en-US \
   --audio reference.wav
 
-# ZipVoice: reference audio plus its exact transcript (English or Chinese)
+# ZipVoice: reference audio plus its exact transcript
 uttermux profile-create zipvoice --name 'My bilingual reader' --language en-US \
-  --audio reference.wav --transcript 'The exact words spoken in the recording.'
+  --audio reference.wav --transcript 'The exact words in the recording.'
 
-uttermux profile-export PROFILE_ID my-reader.uttermux-voice
-uttermux profile-import my-reader.uttermux-voice
-uttermux profile-rename PROFILE_ID 'New name'
-uttermux profile-delete PROFILE_ID
-
-# ElevenLabs Instant Voice Clone; repeat --audio for multiple samples
+# ElevenLabs Instant Voice Clone
 uttermux elevenlabs-clone --name 'My cloud voice' --language en-US \
   --audio sample-one.wav --audio sample-two.wav --confirm-rights
 ```
 
-Local references are normalized to 24 kHz mono PCM, stored beneath
-`~/.local/share/uttermux/voice-profiles`, and protected with user-only
-permissions. Pocket bundles contain the reference WAV; ZipVoice bundles contain
-the WAV and transcript. ElevenLabs clones remain attached to the configured
-account and cannot be exported as local model data. Only clone voices for which
-you have the necessary rights and consent.
-
-## Model support
-
-| Runtime | Location | Desktop status | Cloning | Notes |
-| --- | --- | --- | --- | --- |
-| Piper/VITS | Local | Supported | No | Fast baseline; catalog expansion is ongoing |
-| Inflect Nano | Local | Supported | No | Smallest supported English option |
-| Kitten Nano INT8 | Local | Supported | No | Tiny English model, eight speakers |
-| Kokoro 82M | Local | Supported | No | Multilingual model; current catalog exposes a curated set |
-| Matcha | Local | Downloadable | No | Separate Vocos asset is verified during install |
-| Supertonic 3 INT8 | Local | Downloadable | No | Ten styles, multilingual |
-| Pocket INT8 | Local | Downloadable | Yes | Reference-conditioned; four verified presets included with the download |
-| ZipVoice Distill INT8 | Local | Downloadable | Yes | English/Chinese; exact reference transcript required |
-| Qwen3-TTS 0.6B CustomVoice | Local | Optional companion | Presets now; cloning planned | Nine presets, ten languages, persistent streaming native runtime; ~2.4 GB download |
-| Edge | Online | Supported | No | Unofficial consumer endpoint; may change upstream |
-| ElevenLabs | Online | Supported | Yes (IVC) | Requires API key and Voices write permission |
-| xAI/Grok | Online | Supported | Provider-managed | Automatic multilingual mode available |
-| Azure, Google, AWS, OpenAI, Deepgram, Cartesia, PlayHT, Resemble | Online | Compatibility roadmap | Varies | Not advertised as working until end-to-end credentials tests pass |
-
-MOSS is intentionally excluded from the production catalog. Its April 2026
-ONNX runtime is substantially better than the earlier implementation, but the
-documented i7-8650U reference machine has insufficient streaming headroom for
-reliable continuous reading. See [the MOSS benchmark notes](docs/moss-benchmarks.md).
-Audio8, Chatterbox, NeuTTS, and other larger runtimes remain benchmark
-candidates rather than nonfunctional rows in the application.
-
-Qwen is deliberately optional and never bundled. Install OpenBLAS first, then
-install it from the Voices screen or CLI:
+Local profiles can be exported and imported as `.uttermux-voice` bundles:
 
 ```sh
-sudo pacman -S --needed openblas
-uttermux model install qwen3-tts-0.6b-customvoice
+uttermux profile-export PROFILE_ID my-reader.uttermux-voice
+uttermux profile-import my-reader.uttermux-voice
 ```
 
-The installer pins both the native runtime and official model revisions. It
-builds the AVX2/ARM-appropriate executable under the user's data directory and
-keeps the model loaded in a local streaming companion after first use. On the
-project's i7-8650U reference desktop, direct cold INT8 synthesis used about
-1.84 GB RSS and measured RTF 3.42. The runtime's current help restricts INT4
-to the 1.7B model, so earlier 0.6B `--int4` timings are not treated as valid
-quantization results. Qwen is therefore functional but not a good
-continuous-reader choice on that older AVX2-only CPU. More recent AVX-512/VNNI,
-Apple Silicon, and GPU-equipped desktops should perform substantially better.
-On sufficiently powerful CPUs or supported GPUs, Qwen can run at or faster than
-real time and is a practical local reader option; the warning here applies to
-the documented i7-8650U reference system rather than to Qwen support generally.
-See [the Qwen benchmark notes](docs/qwen-benchmarks.md) for the thread, GGUF,
-streaming, and Intel Vulkan results.
+Reference recordings are normalized to mono PCM and stored with user-only
+permissions under `~/.local/share/uttermux/voice-profiles`.
 
-Pre-quantized GGUF is a future alternative, not an interchangeable file for the
-current C companion. The promising low-storage reader configuration is the
-0.6B CustomVoice talker (fixed presets, no cloning model overhead) plus a
-separately quantized tokenizer. Existing GGUF runtimes offer roughly 860 MB
-Q4_K_M talker+tokenizer payloads; lower experimental combinations approach
-700 MB, but reported Q4 long-form failures make Q5/Q8 talker plus a smaller
-tokenizer the safer document-reading experiment. Any switch requires a second
-runtime integration and the same repetition, cancellation, and long-form tests
-used for the current backend.
+## KOReader desktop bridge
 
-## Configuration
-
-`~/.config/uttermux/config.toml`:
-
-```toml
-schema_version = 2
-default_voice = "sherpa/vits-piper-en_US-lessac-medium/lessac"
-fallback_voice = "sherpa/vits-piper-en_US-lessac-medium/lessac"
-max_loaded_models = 2
-audio_cache_mb = 64
-preload_default_voice = false
-
-[providers.edge]
-enabled = true
-locales = ["en-US", "en-GB"]
-
-[providers.elevenlabs]
-enabled = false
-model = "eleven_flash_v2_5"
-credential_file = "/home/USER/.config/uttermux/credentials/elevenlabs-api-key"
-
-[providers.grok]
-enabled = false
-credential_file = "/home/USER/.config/uttermux/credentials/grok-key"
-automatic_language = true
-
-[routing]
-auto_detect = true
-minimum_characters = 40
-minimum_confidence = 0.8
-default_language = "en-US"
-provider_order = ["elevenlabs", "grok", "edge", "local"]
-cross_language_fallback = true
-
-[routing.voices]
-fr = ["elevenlabs/VOICE_ID"]
-```
-
-Local manifests live in `~/.config/uttermux/models.d`; model data lives in
-`~/.local/share/uttermux/models`. The migration reader also accepts the former
-`speech-dispatcher-sherpa` manifest directory.
-
-## KOReader bridge
-
-The optional `uttermux-koreader.service` preserves the existing localhost:5000
-`/voices`, `/`, `/play`, `/remaining`, and `/stop` API while routing synthesis
-through the broker. It caches up to 20 WAVs in memory and uses PulseAudio's
-`paplay` for playback.
+The optional bridge preserves the localhost API used by the existing KOReader
+TTS plugin while delegating voice selection and routing to UtterMux:
 
 ```sh
 systemctl --user disable --now koreader-tts-edge.service
 systemctl --user enable --now uttermux-koreader.service
 ```
 
-No KOReader plugin changes should be necessary. Keep the old service disabled
-because both services use port 5000.
+Do not run both services because both listen on port 5000. By default the bridge
+follows the global UtterMux voice and language fallbacks.
 
-The bridge delegates voice selection to UtterMux by default, even if KOReader
-has retained an old `server_extra_args.voice` value. The broker then tries a
-language-compatible global default first, followed by the exact/base-language
-route and provider fallbacks. Set `UTTERMUX_KOREADER_FOLLOW_DEFAULT=0` on the
-bridge service only if an explicit KOReader voice should override the global
-selection.
+## Configuration and data
 
-## Provider contract
+| Purpose | Default location |
+| --- | --- |
+| Configuration | `~/.config/uttermux/config.toml` |
+| Provider credentials | `~/.config/uttermux/credentials/` |
+| Model manifests | `~/.config/uttermux/models.d/` |
+| Downloaded models | `~/.local/share/uttermux/models/` |
+| Local voice profiles | `~/.local/share/uttermux/voice-profiles/` |
+| UI state | `~/.local/state/uttermux/ui.json` |
 
-Providers expose stable voice IDs plus BCP-47 language tags, synthesize one
-client utterance into framed PCM, and honor cancellation. Adding a provider is
-isolated to the broker; applications and the Speech Dispatcher module do not
-change. Cloud providers must not trigger fallback after any audio has reached
-the client, which prevents mixed voices within a highlighted Zotero sentence.
+The broker owns synthesis and configuration. The GTK process can be closed;
+Firefox, Zotero, KOReader, and Speech Dispatcher continue to work through the
+socket-activated user service.
 
-Declared Firefox/Zotero language metadata takes precedence. When it is absent,
-UtterMux detects sufficiently long text with `py3langid`; short or uncertain
-utterances use `routing.default_language`. Routing preserves a compatible
-persona, then tries exact/base-language routes and one compatible voice from
-each configured provider. Edge keeps all discovered locales available for
-routing while only `providers.edge.locales` are exposed to Speech Dispatcher.
+## Development
 
-UtterMux is GPL-3.0-or-later. Packaged dependencies retain their upstream
-licenses: `edge-tts` is LGPL-3.0 and `py3langid` is BSD-3-Clause.
+```sh
+cmake --build build
+ctest --test-dir build --output-on-failure
+python -m unittest discover -s tests -v
+python -m py_compile cli/uttermux daemon/uttermuxd.py ui/uttermux-app.py
+```
+
+Architecture and benchmark notes:
+
+- [Android/desktop catalog contract](docs/DESKTOP_PARITY.md)
+- [Catalog schema](docs/interop/catalog-v1.schema.json)
+- [MOSS-TTS-Nano experiments](docs/moss-benchmarks.md)
+- [Qwen3-TTS experiments](docs/qwen-benchmarks.md)
+
+Contributions should keep stable voice IDs, BCP-47 language metadata,
+cancellation, and application highlighting semantics intact. A provider must
+not fall back after it has emitted audio, because that would mix voices within
+one highlighted utterance.
+
+## License
+
+UtterMux is GPL-3.0-or-later. Models, provider services, and packaged
+dependencies retain their own licenses and terms.
