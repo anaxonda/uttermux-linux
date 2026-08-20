@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: >-
           pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf python
@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf speech-dispatcher rubberband
       - run: >-
           cmake -S . -B build-prefix -G Ninja -DBUILD_TESTING=OFF
@@ -47,7 +47,7 @@ jobs:
           apt-get install -y --no-install-recommends git ca-certificates cmake ninja-build
           g++ pkg-config python3 libspeechd-dev libspeechd-module0
           librubberband-dev ffmpeg
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
