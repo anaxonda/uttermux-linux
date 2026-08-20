@@ -4,7 +4,7 @@ pkgver=0.4.0
 pkgrel=1
 pkgdesc='Universal local and online TTS broker for Speech Dispatcher'
 arch=(x86_64 aarch64)
-url='https://github.com/uttermux/uttermux'
+url='https://github.com/anaxonda/uttermux-linux'
 license=(GPL-3.0-or-later)
 depends=('speech-dispatcher>=0.12' libspeechd rubberband python python-gobject gtk4 python-numpy python-aiohttp python-certifi curl ffmpeg libpulse onnxruntime-cpu)
 optdepends=('wl-clipboard: read Wayland selections' 'xclip: read X11 selections' 'xsel: alternate X11 selection reader')

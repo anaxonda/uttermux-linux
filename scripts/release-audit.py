@@ -37,7 +37,7 @@ def main() -> int:
     # The repository has no public remote yet, so the Arch source hash cannot
     # be finalized. Keep CI useful but make a release audit fail loudly.
     pkgbuild = (ROOT / "packaging/arch/PKGBUILD").read_text()
-    if not args.ci and ("SKIP" in pkgbuild or "github.com/uttermux/uttermux" in pkgbuild):
+    if not args.ci and ("SKIP" in pkgbuild or "github.com/anaxonda/uttermux-linux" not in pkgbuild):
         errors.append("Arch package still has placeholder repository URL or hashes")
     for error in errors: print(f"ERROR: {error}", file=sys.stderr)
     return 1 if errors else 0

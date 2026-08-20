@@ -1,9 +1,9 @@
 # Security policy
 
 Please report credential exposure, unsafe model extraction, unauthenticated
-network listeners, or other security problems privately to the maintainers
-before opening a public issue. A dedicated security contact will be added when
-the public repository is created.
+network listeners, or other security problems through the repository's
+[private security advisory form](https://github.com/anaxonda/uttermux-linux/security/advisories/new)
+instead of opening a public issue.
 
 UtterMux treats online-provider credentials, cloned-voice recordings, and
 spoken text as sensitive. Diagnostics must not contain document text or secret
@@ -16,4 +16,3 @@ manifests describe data files only; they cannot run installation commands.
 The project is in active development and does not yet promise a fixed security
 support window. Release notes will identify supported versions once public
 releases begin.
-

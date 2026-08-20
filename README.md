@@ -1,5 +1,7 @@
 # UtterMux
 
+[![Linux CI](https://github.com/anaxonda/uttermux-linux/actions/workflows/linux.yml/badge.svg)](https://github.com/anaxonda/uttermux-linux/actions/workflows/linux.yml)
+
 Use local and online text-to-speech voices everywhere on Linux.
 
 UtterMux makes one voice catalog available to Firefox Reader View, Zotero Read
