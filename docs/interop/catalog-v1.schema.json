@@ -15,7 +15,9 @@
       "location": {"enum": ["on-device", "cloud"]}, "languages": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
       "capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}, "status": {"enum": ["ready", "downloadable", "setup-required", "candidate", "rejected"]},
       "downloadSizeMb": {"type": "integer", "minimum": 0}, "estimatedRamMb": {"type": "integer", "minimum": 0}, "quantization": {"type": "string"},
-      "performanceClass": {"enum": ["fast", "balanced", "heavy", "cloud", "unknown"]}, "license": {"type": "string"}, "sourceUrl": {"type": "string", "format": "uri"}}, "additionalProperties": true}},
+      "performanceClass": {"enum": ["fast", "balanced", "heavy", "cloud", "unknown"]},
+      "recommendation": {"enum": ["recommended", "likely-usable", "may-be-slow", "memory-pressure", "insufficient-memory", "available", "unknown"]},
+      "recommendationReason": {"type": "string"}, "license": {"type": "string"}, "sourceUrl": {"type": "string", "format": "uri"}}, "additionalProperties": true}},
     "voices": {"type": "array", "items": {"type": "object", "required": ["id", "modelId", "speakerId", "name", "languages"], "properties": {
       "id": {"type": "string"}, "modelId": {"type": "string"}, "speakerId": {"type": "string"}, "name": {"type": "string"},
       "languages": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true}, "accent": {"type": "string"}, "gender": {"type": "string"},
@@ -26,6 +28,10 @@
       "voiceId": {"type": "string"}, "referenceSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
       "referenceText": {"type": "string"}, "artifactFile": {"type": "string"}, "available": {"type": "boolean"},
       "directory": {"type": "string"}, "referencePath": {"type": "string"}, "artifactPath": {"type": "string"}}, "additionalProperties": false}},
+    "hardware": {"type": "object", "properties": {"architecture": {"type": "string"}, "logicalCores": {"type": "integer", "minimum": 1},
+      "totalRamMb": {"type": "integer", "minimum": 0}, "availableRamMb": {"type": "integer", "minimum": 0},
+      "cpuFeatures": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+      "inferenceProviders": {"type": "array", "items": {"const": "CPU"}, "maxItems": 1}}, "additionalProperties": false},
     "runtime": {"type": "object", "properties": {"configuredDefault": {"type": "string"}, "routedVoice": {"type": "string"}, "activeVoice": {"type": "string"},
       "status": {"enum": ["idle", "warming", "speaking", "paused", "stopped", "error"]}, "language": {"type": "string"}, "client": {"type": "string"}, "fallbackReason": {"type": "string"}}, "additionalProperties": false}
   },

@@ -7,6 +7,7 @@ import argparse
 import base64
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import socket
@@ -217,6 +218,58 @@ def local_catalog() -> list[dict]:
     with path.open("rb") as stream: return tomllib.load(stream).get("model", [])
 
 
+def hardware_profile() -> dict:
+    """Report only capabilities used by the current CPU inference stack."""
+    memory = {}
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            key, value = line.split(":", 1)
+            if key in {"MemTotal", "MemAvailable"}:
+                memory[key] = int(value.strip().split()[0]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    flags = set()
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            if line.casefold().startswith(("flags", "features")):
+                flags.update(line.split(":", 1)[1].split())
+    except (OSError, IndexError):
+        pass
+    relevant = sorted(flags.intersection(
+        {"avx", "avx2", "avx512f", "fma", "sse4_2", "neon", "asimd"}))
+    return {"architecture": platform.machine(), "logicalCores": os.cpu_count() or 1,
+            "totalRamMb": memory.get("MemTotal", 0),
+            "availableRamMb": memory.get("MemAvailable", 0),
+            "cpuFeatures": relevant, "inferenceProviders": ["CPU"]}
+
+
+def recommend_model(model: dict, hardware: dict) -> tuple[str, str]:
+    if model.get("location") == "cloud":
+        return "available", "Runs online; local CPU and memory do not determine synthesis speed."
+    required = int(model.get("estimatedRamMb", 0))
+    total = int(hardware.get("totalRamMb", 0))
+    available = int(hardware.get("availableRamMb", 0))
+    cores = int(hardware.get("logicalCores", 1))
+    if required and total and required > total * .7:
+        return "insufficient-memory", f"Needs about {required} MB RAM; this system has {total} MB total."
+    if required and available and required > available * .75:
+        return "memory-pressure", f"Needs about {required} MB RAM; only {available} MB is currently available."
+    performance = model.get("performanceClass", "unknown")
+    if performance == "heavy":
+        if cores < 4:
+            return "may-be-slow", "Heavy CPU model on a system with fewer than four logical cores."
+        return "may-be-slow", "Memory should fit, but continuous reading requires a local speed benchmark."
+    if performance == "balanced":
+        return "likely-usable", "Expected to fit; benchmark after download for a machine-specific result."
+    if performance == "fast":
+        return "recommended", "Small CPU model expected to remain ahead of playback."
+    return "unknown", "No machine-specific synthesis benchmark is available yet."
+
+
+def cmd_hardware(_args):
+    print(json.dumps(hardware_profile(), indent=2))
+
+
 def profile_records() -> list[dict]:
     return uttermux_profiles.profiles() if uttermux_profiles else []
 
@@ -284,7 +337,13 @@ def cmd_catalog(_args):
                 "performanceClass": "heavy" if local_companion else "cloud"})
         catalog_voices.append({"id": record["id"], "modelId": model_id, "speakerId": record["id"].split("/")[-1],
             "name": record["name"], "languages": record["languages"], "preview": "generated", "ready": True})
-    print(json.dumps({"schemaVersion": 1, "providers": providers, "models": models,
+    hardware = hardware_profile()
+    for model in models:
+        recommendation, reason = recommend_model(model, hardware)
+        model["recommendation"] = recommendation
+        model["recommendationReason"] = reason
+    print(json.dumps({"schemaVersion": 1, "hardware": hardware,
+                      "providers": providers, "models": models,
                       "voices": catalog_voices, "profiles": profile_records()}, ensure_ascii=False, indent=2))
 
 
@@ -807,7 +866,7 @@ def main():
     parser = argparse.ArgumentParser(prog="uttermux")
     sub = parser.add_subparsers(required=True)
     sub.add_parser("setup").set_defaults(func=setup)
-    for name, func in (("catalog", cmd_catalog), ("status", cmd_status),
+    for name, func in (("catalog", cmd_catalog), ("status", cmd_status), ("hardware", cmd_hardware),
                        ("profiles", cmd_profiles), ("settings-schema", cmd_settings_schema)):
         p = sub.add_parser(name); p.add_argument("--json", action="store_true"); p.set_defaults(func=func)
     p = sub.add_parser("voices"); p.add_argument("--language"); p.add_argument("--provider")

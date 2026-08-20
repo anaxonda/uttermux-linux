@@ -51,6 +51,16 @@ LANGUAGE_NAMES = {
     "zh": "Chinese",
 }
 
+RECOMMENDATION_LABELS = {
+    "recommended": "Recommended here", "likely-usable": "Likely usable",
+    "may-be-slow": "May be slow", "memory-pressure": "Memory pressure",
+    "insufficient-memory": "Insufficient memory", "available": "Online",
+    "unknown": "Not benchmarked",
+}
+RECOMMENDATION_ORDER = {name: index for index, name in enumerate((
+    "recommended", "likely-usable", "may-be-slow", "memory-pressure",
+    "insufficient-memory", "unknown", "available"))}
+
 
 def language_label(tag: str) -> str:
     base = tag.split("-", 1)[0].casefold()
@@ -198,7 +208,9 @@ class VoicePage(Gtk.Box):
         if sort == 1: result.sort(key=lambda item: item["name"].casefold())
         elif sort == 2: result.sort(key=lambda item: item.get("model", {}).get("downloadSizeMb", 10**9))
         elif sort == 3: result.sort(key=lambda item: item.get("model", {}).get("estimatedRamMb", 10**9))
-        else: result.sort(key=lambda item: (item["id"] != self.default_id, not item.get("ready", False), item["name"].casefold()))
+        else: result.sort(key=lambda item: (item["id"] != self.default_id,
+            RECOMMENDATION_ORDER.get(item.get("model", {}).get("recommendation", "unknown"), 99),
+            not item.get("ready", False), item["name"].casefold()))
         for record in result:
             model = record.get("model", {}); row = Gtk.Box(spacing=8)
             provider = model.get("providerId", "local")
@@ -207,9 +219,12 @@ class VoicePage(Gtk.Box):
             if model.get("downloadSizeMb"): details.append(f"{model['downloadSizeMb']} MB download")
             if model.get("estimatedRamMb"): details.append(f"~{model['estimatedRamMb']} MB RAM")
             if model.get("quantization"): details.append(model["quantization"])
+            recommendation = model.get("recommendation", "unknown")
+            details.append(RECOMMENDATION_LABELS.get(recommendation, recommendation))
             label = Gtk.Label(xalign=0, hexpand=True, wrap=True)
             marker = "✓ " if record["id"] == self.default_id else ""
             label.set_markup(f"<b>{html.escape(marker + record['name'])}</b>\n<small>{html.escape(' · '.join(filter(None, details)))}</small>")
+            label.set_tooltip_text(model.get("recommendationReason", ""))
             row.append(label)
             if record.get("ready"):
                 choose = Gtk.Button(label="Active" if record["id"] == self.default_id else "Use")

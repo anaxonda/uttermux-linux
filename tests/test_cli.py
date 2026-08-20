@@ -23,6 +23,15 @@ profiles = importlib.util.module_from_spec(profile_spec); profile_loader.exec_mo
 
 
 class CliTests(unittest.TestCase):
+    def test_cpu_recommendations_are_advisory_and_memory_aware(self):
+        hardware = {"logicalCores": 8, "totalRamMb": 8000, "availableRamMb": 6000}
+        self.assertEqual(ut.recommend_model({"location": "on-device", "estimatedRamMb": 180,
+            "performanceClass": "fast"}, hardware)[0], "recommended")
+        self.assertEqual(ut.recommend_model({"location": "on-device", "estimatedRamMb": 7000,
+            "performanceClass": "heavy"}, hardware)[0], "insufficient-memory")
+        self.assertEqual(ut.recommend_model({"location": "cloud"}, hardware)[0], "available")
+        self.assertEqual(ut.hardware_profile()["inferenceProviders"], ["CPU"])
+
     def test_preview_uses_broker_sample_format_not_channel_count(self):
         packets = [(ut.AUDIO_START, __import__("struct").pack("<IB", 24000, 2)),
                    (ut.AUDIO, b"\x00\x01")]

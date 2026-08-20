@@ -185,8 +185,18 @@ Catalog entries represent concrete artifacts, not only model families. Several
 variants of one family—FP32, FP16, INT8, small, medium, or high-quality—can
 coexist. The manager shows download size, estimated working memory,
 quantization, and measured performance class, and can sort by download or RAM.
-A hardware recommender can use those fields plus CPU features and available
-memory; it should recommend a variant, never silently download one.
+The manager combines those fields with detected CPU features and available
+memory and labels each artifact **Recommended here**, **Likely usable**, **May
+be slow**, or with a memory warning. These are conservative estimates until a
+model has been benchmarked locally. UtterMux reports only the CPU inference
+provider it actually supports; it does not display speculative GPU suitability.
+Recommendations never trigger a download or hide an incompatible model.
+
+Inspect the non-identifying local capability report with:
+
+```sh
+uttermux hardware --json
+```
 
 Custom sherpa-onnx models can be registered with a schema-1 manifest in
 `~/.config/uttermux/models.d/`. A custom model is data plus declarative paths;
@@ -194,6 +204,15 @@ UtterMux does not execute installer commands from user catalogs. The planned
 GUI importer will validate the engine, BCP-47 voice metadata, required files,
 and paths. Downloadable third-party catalogs will require fixed HTTPS URLs and
 SHA-256 hashes.
+
+## Distribution support
+
+Arch Linux is currently the only tested and packaged desktop target. The core
+uses standard CMake, GTK 4, Speech Dispatcher 0.12+, ONNX Runtime, Rubber Band,
+Python, and systemd user services, so it should be portable to current
+systemd-based distributions. However, Debian/Ubuntu, Fedora, openSUSE, NixOS,
+Flatpak, non-systemd sessions, and installations under `/usr/local` are not yet
+release-supported because they lack packages and automated integration tests.
 
 ## Language routing
 
