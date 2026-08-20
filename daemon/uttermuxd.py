@@ -701,6 +701,21 @@ class Broker:
             engine.lock.acquire()
             return engine
 
+    def preload_default_voice(self) -> None:
+        """Warm the selected local model without synthesizing or playing audio."""
+        if not self.config.get("preload_default_voice", False):
+            return
+        voice_id = self.config.get("default_voice", "")
+        if voice_id not in self.voices:
+            return
+        model, _voice = self.voices[voice_id]
+        try:
+            engine = self.engine(model)
+            engine.lock.release()
+            print(f"uttermuxd: preloaded {model['id']}", file=sys.stderr)
+        except Exception as error:
+            print(f"uttermuxd: could not preload {model['id']}: {error}", file=sys.stderr)
+
     def synthesize_local(self, model, voice, text, speed, emit, cancelled, profile=None):
         engine = self.engine(model)
         try:
@@ -947,6 +962,7 @@ def main() -> int:
     args = parser.parse_args()
     broker = Broker()
     server = listening_socket(args.socket)
+    threading.Thread(target=broker.preload_default_voice, daemon=True).start()
     while True:
         connection, _ = server.accept()
         threading.Thread(target=client_loop, args=(connection, broker), daemon=True).start()

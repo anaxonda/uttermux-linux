@@ -129,6 +129,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(emitted[1][self.u.HEADER.size:], bytes(samples))
         api.SherpaOnnxDestroyOfflineTtsGeneratedAudio.assert_called_once()
 
+    def test_preload_warms_only_the_configured_local_voice(self):
+        broker = object.__new__(self.u.Broker)
+        model = {"id": "kokoro", "engine": "kokoro"}
+        broker.config = {"preload_default_voice": True, "default_voice": "local/bella"}
+        broker.voices = {"local/bella": (model, {"id": "bella"})}
+        loaded = mock.MagicMock()
+        broker.engine = mock.Mock(return_value=loaded)
+        broker.preload_default_voice()
+        broker.engine.assert_called_once_with(model)
+        loaded.lock.release.assert_called_once()
+
     def test_rejects_bad_protocol_version(self):
         raw = bytearray(self.u.packet(self.u.HEALTH, 1)); raw[4:6] = (99).to_bytes(2, "little")
         with self.assertRaises(ValueError): self.u.unpack(bytes(raw))

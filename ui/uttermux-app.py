@@ -360,6 +360,8 @@ class SettingsPage(Gtk.Box):
         box.append(Gtk.Label(label="These controls affect the broker used by Firefox, Zotero, selection reading, and KOReader.", xalign=0, wrap=True))
         self.auto_language = Gtk.Switch(); self.auto_language.connect("state-set", self.set_boolean, "auto-detect-language")
         box.append(self.setting_row("Detect language automatically", "Routes longer text to a compatible configured voice.", self.auto_language))
+        self.preload_voice = Gtk.Switch(); self.preload_voice.connect("state-set", self.set_boolean, "preload-default-voice")
+        box.append(self.setting_row("Preload active local voice", "Uses more memory after login, but removes the first-use model loading delay.", self.preload_voice))
         self.model_cache = Gtk.SpinButton.new_with_range(1, 8, 1)
         box.append(self.setting_row("Warm local models", "More reduces model-switch delay but increases RAM use.", self.model_cache))
         self.audio_cache = Gtk.SpinButton.new_with_range(0, 1024, 16)
@@ -401,6 +403,7 @@ class SettingsPage(Gtk.Box):
         for provider, widget in self.provider_switches.items(): widget.set_active(bool(enabled.get(provider)))
         playback = schema.get("playback", {})
         self.auto_language.set_active(bool(playback.get("autoDetectLanguage", {}).get("value", True)))
+        self.preload_voice.set_active(bool(playback.get("preloadDefaultVoice", {}).get("value", False)))
         self.model_cache.set_value(playback.get("maxLoadedModels", {}).get("value", 2))
         self.audio_cache.set_value(playback.get("audioCacheMb", {}).get("value", 64))
         self.loading = False; return GLib.SOURCE_REMOVE

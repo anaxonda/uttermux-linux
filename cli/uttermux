@@ -100,7 +100,8 @@ def quote(value) -> str:
 
 def render_config(doc: dict) -> str:
     lines = ["schema_version = 2", f'max_loaded_models = {int(doc.get("max_loaded_models", 2))}',
-             f'audio_cache_mb = {int(doc.get("audio_cache_mb", 64))}']
+             f'audio_cache_mb = {int(doc.get("audio_cache_mb", 64))}',
+             f'preload_default_voice = {str(bool(doc.get("preload_default_voice", False))).lower()}']
     for key in ("default_voice", "fallback_voice"):
         if doc.get(key): lines.append(f'{key} = {quote(doc[key])}')
     providers = doc.get("providers", {})
@@ -149,6 +150,7 @@ def restart() -> None:
 def setup(_args):
     doc = read_config()
     doc.setdefault("max_loaded_models", 2)
+    doc.setdefault("preload_default_voice", False)
     doc.setdefault("fallback_voice", "sherpa/vits-piper-en_US-lessac-medium/lessac")
     doc.setdefault("default_voice", doc["fallback_voice"])
     doc.setdefault("providers", {})
@@ -336,6 +338,8 @@ def cmd_settings_schema(_args):
                             "value": int(document.get("max_loaded_models", 2))},
         "audioCacheMb": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64,
                          "value": int(document.get("audio_cache_mb", 64))},
+        "preloadDefaultVoice": {"type": "boolean", "default": False,
+                                "value": bool(document.get("preload_default_voice", False))},
         "autoDetectLanguage": {"type": "boolean", "default": True,
                                "value": bool(routing.get("auto_detect", True))}}}, indent=2))
 
@@ -539,6 +543,11 @@ def cmd_setting(args):
         if value not in {"true", "false", "1", "0", "yes", "no"}:
             raise RuntimeError("auto-detect-language expects true or false")
         doc.setdefault("routing", {})["auto_detect"] = value in {"true", "1", "yes"}
+    elif args.name == "preload-default-voice":
+        value = args.value.casefold()
+        if value not in {"true", "false", "1", "0", "yes", "no"}:
+            raise RuntimeError("preload-default-voice expects true or false")
+        doc["preload_default_voice"] = value in {"true", "1", "yes"}
     atomic_write(config_path(), render_config(doc)); restart()
 
 
@@ -743,7 +752,7 @@ def main():
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
     p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.set_defaults(func=cmd_provider)
     p = sub.add_parser("provider-default"); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
-    p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb", "auto-detect-language")); p.add_argument("value"); p.set_defaults(func=cmd_setting)
+    p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb", "auto-detect-language", "preload-default-voice")); p.add_argument("value"); p.set_defaults(func=cmd_setting)
     p = sub.add_parser("edge-locales"); p.add_argument("locales", nargs="+"); p.set_defaults(func=cmd_edge_locales)
     p = sub.add_parser("elevenlabs-key"); p.add_argument("key"); p.set_defaults(func=cmd_key)
     p = sub.add_parser("credential-set"); p.add_argument("provider", choices=("elevenlabs", "grok")); p.set_defaults(func=cmd_credential_set)

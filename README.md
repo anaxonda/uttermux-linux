@@ -183,9 +183,12 @@ you have the necessary rights and consent.
 | xAI/Grok | Online | Supported | Provider-managed | Automatic multilingual mode available |
 | Azure, Google, AWS, OpenAI, Deepgram, Cartesia, PlayHT, Resemble | Online | Compatibility roadmap | Varies | Not advertised as working until end-to-end credentials tests pass |
 
-MOSS is intentionally excluded. Audio8, Chatterbox, NeuTTS, and
-other larger runtimes remain benchmark candidates rather than nonfunctional
-rows in the application.
+MOSS is intentionally excluded from the production catalog. Its April 2026
+ONNX runtime is substantially better than the earlier implementation, but the
+documented i7-8650U reference machine has insufficient streaming headroom for
+reliable continuous reading. See [the MOSS benchmark notes](docs/moss-benchmarks.md).
+Audio8, Chatterbox, NeuTTS, and other larger runtimes remain benchmark
+candidates rather than nonfunctional rows in the application.
 
 Qwen is deliberately optional and never bundled. Install OpenBLAS first, then
 install it from the Voices screen or CLI:
@@ -204,6 +207,9 @@ to the 1.7B model, so earlier 0.6B `--int4` timings are not treated as valid
 quantization results. Qwen is therefore functional but not a good
 continuous-reader choice on that older AVX2-only CPU. More recent AVX-512/VNNI,
 Apple Silicon, and GPU-equipped desktops should perform substantially better.
+On sufficiently powerful CPUs or supported GPUs, Qwen can run at or faster than
+real time and is a practical local reader option; the warning here applies to
+the documented i7-8650U reference system rather than to Qwen support generally.
 See [the Qwen benchmark notes](docs/qwen-benchmarks.md) for the thread, GGUF,
 streaming, and Intel Vulkan results.
 
@@ -227,6 +233,7 @@ default_voice = "sherpa/vits-piper-en_US-lessac-medium/lessac"
 fallback_voice = "sherpa/vits-piper-en_US-lessac-medium/lessac"
 max_loaded_models = 2
 audio_cache_mb = 64
+preload_default_voice = false
 
 [providers.edge]
 enabled = true
