@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  source-release:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: >-
+          pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf python
+          speech-dispatcher rubberband onnxruntime-cpu ffmpeg github-cli
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - run: python scripts/release-audit.py --ci
+      - name: Create deterministic source archive
+        run: |
+          git archive --format=tar --prefix="uttermux-linux-${GITHUB_REF_NAME#v}/" "$GITHUB_REF_NAME" | gzip -n > "uttermux-linux-${GITHUB_REF_NAME#v}.tar.gz"
+          sha256sum "uttermux-linux-${GITHUB_REF_NAME#v}.tar.gz" > SHA256SUMS
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          "uttermux-linux-${GITHUB_REF_NAME#v}.tar.gz" SHA256SUMS
+          --repo "$GITHUB_REPOSITORY" --prerelease --generate-notes
