@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uttermux.io/schema/catalog-v1.json",
+  "title": "UtterMux cross-platform catalog",
+  "type": "object",
+  "required": ["schemaVersion", "providers", "models", "voices"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "providers": {"type": "array", "items": {"type": "object", "required": ["id", "name", "network", "cost"], "properties": {
+      "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"}, "name": {"type": "string"}, "network": {"type": "boolean"},
+      "cost": {"enum": ["free", "metered", "subscription", "unknown"]}, "capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+      "documentationUrl": {"type": "string", "format": "uri"}}, "additionalProperties": true}},
+    "models": {"type": "array", "items": {"type": "object", "required": ["id", "providerId", "library", "version", "engine", "location", "languages", "capabilities", "status"], "properties": {
+      "id": {"type": "string"}, "providerId": {"type": "string"}, "library": {"type": "string"}, "version": {"type": "string"}, "engine": {"type": "string"},
+      "location": {"enum": ["on-device", "cloud"]}, "languages": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+      "capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}, "status": {"enum": ["ready", "downloadable", "setup-required", "candidate", "rejected"]},
+      "downloadSizeMb": {"type": "integer", "minimum": 0}, "estimatedRamMb": {"type": "integer", "minimum": 0}, "quantization": {"type": "string"},
+      "performanceClass": {"enum": ["fast", "balanced", "heavy", "cloud", "unknown"]}, "license": {"type": "string"}, "sourceUrl": {"type": "string", "format": "uri"}}, "additionalProperties": true}},
+    "voices": {"type": "array", "items": {"type": "object", "required": ["id", "modelId", "speakerId", "name", "languages"], "properties": {
+      "id": {"type": "string"}, "modelId": {"type": "string"}, "speakerId": {"type": "string"}, "name": {"type": "string"},
+      "languages": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true}, "accent": {"type": "string"}, "gender": {"type": "string"},
+      "preview": {"enum": ["generated", "sample", "paid-generated", "unavailable"]}}, "additionalProperties": true}},
+    "profiles": {"type": "array", "items": {"type": "object", "required": ["id", "name", "language", "engine", "modelVersion", "referenceFile", "createdAt", "localOnly"], "properties": {
+      "id": {"type": "string"}, "name": {"type": "string"}, "language": {"type": "string"}, "engine": {"type": "string"}, "modelVersion": {"type": "string"},
+      "referenceFile": {"type": "string"}, "createdAt": {"type": "integer", "minimum": 0}, "localOnly": {"const": true}}, "additionalProperties": false}},
+    "runtime": {"type": "object", "properties": {"configuredDefault": {"type": "string"}, "routedVoice": {"type": "string"}, "activeVoice": {"type": "string"},
+      "status": {"enum": ["idle", "warming", "speaking", "paused", "stopped", "error"]}, "language": {"type": "string"}, "client": {"type": "string"}, "fallbackReason": {"type": "string"}}, "additionalProperties": false}
+  },
+  "additionalProperties": true
+}

@@ -5,6 +5,12 @@ Zotero Read Aloud, `spd-say`, and desktop selection shortcuts all see one
 Speech Dispatcher module while a socket-activated broker owns local models and
 online connections.
 
+The Android application is maintained separately but shares the versioned
+catalog vocabulary in [`docs/interop/catalog-v1.schema.json`](docs/interop/catalog-v1.schema.json).
+The desktop migration contract and planned Voices/Create/Settings parity are
+documented in [`docs/DESKTOP_PARITY.md`](docs/DESKTOP_PARITY.md); Speech
+Dispatcher remains the Linux compatibility boundary.
+
 ```text
 Firefox / Zotero / spd-say / selection shortcut
                       |
