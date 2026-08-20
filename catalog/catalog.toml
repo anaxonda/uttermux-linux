@@ -215,3 +215,40 @@ voices = [
   { id = "eric", name = "Eric", language = "zh-CN", speaker_id = 2875 },
   { id = "dylan", name = "Dylan", language = "zh-CN", speaker_id = 2878 },
 ]
+
+[[model]]
+id = "moss-tts-nano-100m-onnx"
+engine = "moss"
+external_installer = "install-moss"
+family = "MOSS-TTS-Nano"
+description = "MOSS-TTS-Nano 100M multilingual ONNX model with progressive CPU streaming"
+url = "https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX"
+size = 763363328
+estimated_ram_mb = 1400
+quantization = "FP32 ONNX"
+performance_class = "heavy"
+license = "Apache-2.0"
+source_url = "https://github.com/OpenMOSS/MOSS-TTS-Nano"
+capabilities = ["streaming", "multilingual"]
+languages = ["en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it", "ar", "cs", "da", "el", "fi", "hi", "hu", "nl", "pl", "tr"]
+files = {}
+voices = [
+  { id = "adam", name = "Adam", language = "en-US", speaker_id = 0 },
+  { id = "ava", name = "Ava", language = "en-US", speaker_id = 0 },
+  { id = "bella", name = "Bella", language = "en-US", speaker_id = 0 },
+  { id = "nathan", name = "Nathan", language = "en-US", speaker_id = 0 },
+  { id = "trump", name = "Trump", language = "en-US", speaker_id = 0 },
+  { id = "junhao", name = "Junhao", language = "zh-CN", speaker_id = 0 },
+  { id = "zhiming", name = "Zhiming", language = "zh-CN", speaker_id = 0 },
+  { id = "weiguo", name = "Weiguo", language = "zh-CN", speaker_id = 0 },
+  { id = "xiaoyu", name = "Xiaoyu", language = "zh-CN", speaker_id = 0 },
+  { id = "yuewen", name = "Yuewen", language = "zh-CN", speaker_id = 0 },
+  { id = "lingyu", name = "Lingyu", language = "zh-CN", speaker_id = 0 },
+  { id = "soyo", name = "Soyo", language = "ja-JP", speaker_id = 0 },
+  { id = "saki", name = "Saki", language = "ja-JP", speaker_id = 0 },
+  { id = "mortis", name = "Mortis", language = "ja-JP", speaker_id = 0 },
+  { id = "umiri", name = "Umiri", language = "ja-JP", speaker_id = 0 },
+  { id = "mei", name = "Mei", language = "ja-JP", speaker_id = 0 },
+  { id = "anon", name = "Anon", language = "ja-JP", speaker_id = 0 },
+  { id = "arisa", name = "Arisa", language = "ja-JP", speaker_id = 0 },
+]

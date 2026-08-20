@@ -72,9 +72,9 @@ is the appropriate starting point on this machine.
 
 ## Decision
 
-Keep MOSS out of the selectable catalog until the parallel producer/decoder
-adapter is integrated. The model is fast enough on the reference CPU when the
-two stages do not serialize, but the prototype still needs bounded buffering,
-cancellation, adaptive startup reserve, and removal of upstream's artificial
-inter-chunk silence. Acceptance requires continuous KOReader/Librera/Firefox
-playback and no audible chunk seams.
+The parallel producer/decoder adapter is now integrated as an optional local
+companion. It has bounded frame and PCM queues, cancellation, persistent model
+loading, four-frame codec batches, and no artificial inter-chunk silence. The
+model is fast enough on the reference CPU when its stages overlap. Continuous
+KOReader/Librera/Firefox testing is still required before recommending it as a
+default, particularly to detect audible seams at internal 75-token boundaries.

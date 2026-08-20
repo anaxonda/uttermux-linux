@@ -606,6 +606,98 @@ class QwenProvider:
             raise RuntimeError("Qwen returned no audio")
 
 
+class MossProvider:
+    """Persistent MOSS-TTS-Nano ONNX companion with parallel codec decoding."""
+
+    VOICES = (("Junhao", "zh-CN"), ("Zhiming", "zh-CN"), ("Weiguo", "zh-CN"),
+              ("Xiaoyu", "zh-CN"), ("Yuewen", "zh-CN"), ("Lingyu", "zh-CN"),
+              ("Trump", "en-US"), ("Ava", "en-US"), ("Bella", "en-US"),
+              ("Adam", "en-US"), ("Nathan", "en-US"), ("Soyo", "ja-JP"),
+              ("Saki", "ja-JP"), ("Mortis", "ja-JP"), ("Umiri", "ja-JP"),
+              ("Mei", "ja-JP"), ("Anon", "ja-JP"), ("Arisa", "ja-JP"))
+    LANGUAGES = ("en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it",
+                 "ar", "cs", "da", "el", "fi", "hi", "hu", "nl", "pl", "tr")
+
+    def __init__(self, config: dict):
+        data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "uttermux"
+        root = Path(config.get("root", data / "runtimes/moss-tts-nano"))
+        self.python = Path(config.get("python", root / "venv/bin/python"))
+        self.server = Path(config.get("server", root / "moss_server.py"))
+        self.source = Path(config.get("source", root / "source"))
+        self.models = Path(config.get("model_dir", data / "models/moss-tts-nano"))
+        required = (self.python, self.server, self.source / "onnx_tts_runtime.py",
+                    self.models / "MOSS-TTS-Nano-100M-ONNX/browser_poc_manifest.json")
+        if not all(path.is_file() for path in required):
+            raise RuntimeError("MOSS runtime/model is not installed")
+        self.port = int(config.get("port", 17873))
+        self.threads = max(1, int(config.get("threads", 2)))
+        self.batch_frames = max(1, int(config.get("batch_frames", 4)))
+        self.process: subprocess.Popen | None = None
+        self.lock = threading.Lock()
+
+    def voices(self):
+        capabilities = tuple(normalize_language(item) for item in self.LANGUAGES)
+        for voice, native in self.VOICES:
+            yield (f"moss/{voice.casefold()}", f"{voice} · MOSS Nano", native,
+                   "moss", "MOSS-TTS-Nano 100M", capabilities, True)
+
+    def _health(self):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/v1/health", timeout=.5) as response:
+                return response.status == 200
+        except (OSError, urllib.error.URLError):
+            return False
+
+    def _ensure_server(self, cancelled):
+        with self.lock:
+            if self.process and self.process.poll() is None and self._health(): return
+            if self.process and self.process.poll() is None: self.process.terminate()
+            self.process = subprocess.Popen([
+                str(self.python), str(self.server), "--source", str(self.source),
+                "--models", str(self.models), "--threads", str(self.threads),
+                "--port", str(self.port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline and not cancelled.is_set():
+                if self.process.poll() is not None:
+                    raise RuntimeError(f"MOSS server failed to start (exit {self.process.returncode})")
+                if self._health(): return
+                time.sleep(.2)
+            if self.process and self.process.poll() is None: self.process.terminate()
+            raise RuntimeError("MOSS startup cancelled" if cancelled.is_set() else
+                               "MOSS model did not become ready within 90 seconds")
+
+    def _cancel(self):
+        try:
+            request = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/cancel",
+                                             data=b"{}", method="POST")
+            urllib.request.urlopen(request, timeout=.5).close()
+        except (OSError, urllib.error.URLError):
+            pass
+
+    def synthesize(self, voice_id, text, speed, emit, cancelled, language=""):
+        del speed, language
+        self._ensure_server(cancelled)
+        voices = {name.casefold(): name for name, _native in self.VOICES}
+        key = voice_id.removeprefix("moss/").casefold()
+        if key not in voices: raise ValueError(f"unknown MOSS voice: {voice_id}")
+        body = json.dumps({"text": text, "voice": voices[key],
+                           "batch_frames": self.batch_frames}).encode()
+        request = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/tts/stream",
+            data=body, method="POST", headers={"Content-Type": "application/json"})
+        started = False
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                while not cancelled.is_set():
+                    chunk = response.read(32768)
+                    if not chunk: break
+                    if not started:
+                        emit(packet(AUDIO_START, 0, struct.pack("<IB", 48000, 1))); started = True
+                    emit(packet(AUDIO, 0, chunk))
+        finally:
+            if cancelled.is_set(): self._cancel()
+        if not started and not cancelled.is_set(): raise RuntimeError("MOSS returned no audio")
+
+
 class Broker:
     def __init__(self):
         self.config = load_config()
@@ -663,9 +755,14 @@ class Broker:
                     profile["language"], "local", model["id"], (profile["language"],), True)
         provider_config = self.config.get("providers", {})
         for provider_name, provider_type in (("edge", EdgeProvider), ("elevenlabs", ElevenLabsProvider),
-                                             ("grok", GrokProvider), ("qwen", QwenProvider)):
+                                             ("grok", GrokProvider), ("qwen", QwenProvider),
+                                             ("moss", MossProvider)):
             cfg = provider_config.get(provider_name, {})
-            if not cfg.get("enabled", provider_name == "qwen"):
+            if provider_name == "moss":
+                cfg = dict(cfg)
+                cfg.setdefault("threads", self.config.get("moss_threads", 2))
+                cfg.setdefault("batch_frames", self.config.get("moss_batch_frames", 4))
+            if not cfg.get("enabled", provider_name in {"qwen", "moss"}):
                 continue
             try:
                 provider = provider_type(cfg)

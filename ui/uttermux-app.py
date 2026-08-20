@@ -388,6 +388,10 @@ class SettingsPage(Gtk.Box):
         box.append(self.setting_row("Pocket generation chunk", "Larger chunks may improve continuity at the cost of responsiveness. Recommended: 4.", self.pocket_chunk))
         self.zipvoice_steps = Gtk.SpinButton.new_with_range(1, 8, 1)
         box.append(self.setting_row("ZipVoice quality steps", "More flow-matching steps trade speed for quality. Recommended: 4.", self.zipvoice_steps))
+        self.moss_threads = Gtk.SpinButton.new_with_range(1, 8, 1)
+        box.append(self.setting_row("MOSS pipeline threads", "Threads per ONNX stage. Two is fastest on the reference four-core laptop; generation and decoding already run in parallel.", self.moss_threads))
+        self.moss_batch = Gtk.SpinButton.new_with_range(1, 16, 1)
+        box.append(self.setting_row("MOSS decode batch", "Smaller batches start sooner; larger batches may slightly improve throughput. Recommended: 4.", self.moss_batch))
         self.model_cache = Gtk.SpinButton.new_with_range(1, 8, 1)
         box.append(self.setting_row("Warm local models", "More reduces model-switch delay but increases RAM use.", self.model_cache))
         self.audio_cache = Gtk.SpinButton.new_with_range(0, 1024, 16)
@@ -444,6 +448,8 @@ class SettingsPage(Gtk.Box):
         self.pocket_steps.set_value(playback.get("pocketNumSteps", {}).get("value", 3))
         self.pocket_chunk.set_value(playback.get("pocketChunkSize", {}).get("value", 4))
         self.zipvoice_steps.set_value(playback.get("zipvoiceNumSteps", {}).get("value", 4))
+        self.moss_threads.set_value(playback.get("mossThreads", {}).get("value", 2))
+        self.moss_batch.set_value(playback.get("mossBatchFrames", {}).get("value", 4))
         self.model_cache.set_value(playback.get("maxLoadedModels", {}).get("value", 2))
         self.audio_cache.set_value(playback.get("audioCacheMb", {}).get("value", 64))
         self.language_characters.set_value(playback.get("languageMinimumCharacters", {}).get("value", 40))
@@ -473,6 +479,8 @@ class SettingsPage(Gtk.Box):
                       ("pocket-num-steps", self.pocket_steps.get_value_as_int()),
                       ("pocket-chunk-size", self.pocket_chunk.get_value_as_int()),
                       ("zipvoice-num-steps", self.zipvoice_steps.get_value_as_int()),
+                      ("moss-threads", self.moss_threads.get_value_as_int()),
+                      ("moss-batch-frames", self.moss_batch.get_value_as_int()),
                       ("max-loaded-models", self.model_cache.get_value_as_int()),
                       ("audio-cache-mb", self.audio_cache.get_value_as_int()),
                       ("language-minimum-characters", self.language_characters.get_value_as_int()),

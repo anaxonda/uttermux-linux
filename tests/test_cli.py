@@ -23,6 +23,23 @@ profiles = importlib.util.module_from_spec(profile_spec); profile_loader.exec_mo
 
 
 class CliTests(unittest.TestCase):
+    def test_preview_uses_broker_sample_format_not_channel_count(self):
+        packets = [(ut.AUDIO_START, __import__("struct").pack("<IB", 24000, 2)),
+                   (ut.AUDIO, b"\x00\x01")]
+        process = mock.Mock()
+        process.stdin = mock.Mock()
+        process.poll.return_value = 0
+        process.wait.return_value = 0
+        with mock.patch.object(ut, "voice_records", return_value=[{
+                "id": "edge/test", "name": "Test", "native_language": "en-US"}]), \
+             mock.patch.object(ut, "transact", return_value=iter(packets)), \
+             mock.patch.object(ut, "GLib_find_program", return_value="/usr/bin/paplay"), \
+             mock.patch.object(ut.subprocess, "Popen", return_value=process) as popen:
+            ut.cmd_preview(__import__("argparse").Namespace(
+                voice="edge/test", language="", text="Preview"))
+        self.assertIn("--format=s16le", popen.call_args.args[0])
+        self.assertIn("--channels=1", popen.call_args.args[0])
+
     def test_schema_two_preserves_language_routes(self):
         rendered = ut.render_config({
             "default_voice": "edge/libby", "fallback_voice": "local/lessac",
@@ -36,13 +53,15 @@ class CliTests(unittest.TestCase):
         rendered = ut.render_config({
             "local_threads": 2, "local_silence_scale": .1,
             "pocket_num_steps": 5, "pocket_chunk_size": 8,
-            "zipvoice_num_steps": 6,
+            "zipvoice_num_steps": 6, "moss_threads": 2, "moss_batch_frames": 4,
         })
         self.assertIn("local_threads = 2", rendered)
         self.assertIn("local_silence_scale = 0.1", rendered)
         self.assertIn("pocket_num_steps = 5", rendered)
         self.assertIn("pocket_chunk_size = 8", rendered)
         self.assertIn("zipvoice_num_steps = 6", rendered)
+        self.assertIn("moss_threads = 2", rendered)
+        self.assertIn("moss_batch_frames = 4", rendered)
 
     def test_short_text_is_not_auto_detected(self):
         language, confidence, reason = ut.detect_text("Bonjour.")
@@ -57,6 +76,7 @@ class CliTests(unittest.TestCase):
         try:
             catalog = sv.load_catalog()
             self.assertIn("kokoro-multi-lang-v1_0", catalog)
+            self.assertEqual(catalog["moss-tts-nano-100m-onnx"]["external_installer"], "install-moss")
             self.assertEqual(catalog["kokoro-multi-lang-v1_0"]["voices"][0]["language"], "en-US")
             for item in catalog.values():
                 if not item.get("external_installer"):

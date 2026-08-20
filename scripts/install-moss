@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source_commit=cc7bdf19c7639c0870dab22045a33b442760f6be
+tts_revision=f52645cb467506d8e18e746ddd59482685b74e58
+codec_revision=ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae
+data_root=${XDG_DATA_HOME:-"$HOME/.local/share"}/uttermux
+runtime_root="$data_root/runtimes/moss-tts-nano"
+source_root="$runtime_root/source"
+model_root="$data_root/models/moss-tts-nano"
+server_source=${UTTERMUX_MOSS_SERVER:-/usr/lib/uttermux/moss-server}
+
+if [[ ${1:-} == --remove ]]; then
+    echo "MOSS data is preserved to prevent an accidental 900 MB re-download." >&2
+    echo "Remove these explicitly if desired: $runtime_root and $model_root" >&2
+    exit 2
+fi
+
+mkdir -p "$runtime_root" "$model_root"
+if [[ ! -d "$source_root/.git" ]]; then
+    git clone https://github.com/OpenMOSS/MOSS-TTS-Nano.git "$source_root"
+fi
+git -C "$source_root" fetch --depth 1 origin "$source_commit"
+git -C "$source_root" checkout --detach "$source_commit"
+
+if [[ ! -x "$runtime_root/venv/bin/python" ]]; then
+    python -m venv "$runtime_root/venv"
+fi
+"$runtime_root/venv/bin/python" -m pip install --disable-pip-version-check \
+    'numpy>=1.24' 'onnxruntime>=1.20' 'sentencepiece>=0.1.99'
+
+if [[ ! -f "$server_source" ]]; then
+    server_source=$(dirname "$0")/../providers/moss_server.py
+fi
+install -m 755 "$server_source" "$runtime_root/moss_server.py"
+
+download_repo() {
+    local repo=$1 revision=$2 target=$3; shift 3
+    mkdir -p "$target"
+    local file partial
+    for file in "$@"; do
+        [[ -s "$target/$file" ]] && continue
+        partial="$target/$file.partial"
+        curl --fail --location --retry 3 --continue-at - \
+            --output "$partial" "https://huggingface.co/$repo/resolve/$revision/$file"
+        mv "$partial" "$target/$file"
+    done
+}
+
+download_repo OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX "$tts_revision" \
+    "$model_root/MOSS-TTS-Nano-100M-ONNX" \
+    browser_poc_manifest.json moss_tts_decode_step.onnx moss_tts_global_shared.data \
+    moss_tts_local_cached_step.onnx moss_tts_local_decoder.onnx \
+    moss_tts_local_fixed_sampled_frame.onnx moss_tts_local_shared.data \
+    moss_tts_prefill.onnx tokenizer.model tts_browser_onnx_meta.json
+download_repo OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX "$codec_revision" \
+    "$model_root/MOSS-Audio-Tokenizer-Nano-ONNX" \
+    codec_browser_onnx_meta.json moss_audio_tokenizer_decode_full.onnx \
+    moss_audio_tokenizer_decode_shared.data moss_audio_tokenizer_decode_step.onnx \
+    moss_audio_tokenizer_encode.data moss_audio_tokenizer_encode.onnx
+
+systemctl --user try-restart uttermux.service speech-dispatcher.service >/dev/null 2>&1 || true
+echo "Installed MOSS-TTS-Nano ONNX runtime and model."

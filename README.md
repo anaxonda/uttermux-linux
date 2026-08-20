@@ -69,6 +69,7 @@ No model is downloaded automatically.
 | Supertonic 3 INT8 | Locally | Downloadable | No | 129 MB | Multilingual styles |
 | Pocket INT8 | Locally | Supported | Yes | 176 MB | Presets or a reference recording |
 | ZipVoice Distill INT8 | Locally | Supported | Yes | 156 MB | English/Chinese; exact transcript required |
+| MOSS-TTS-Nano 100M ONNX | Local companion | Optional | Upstream supports it; presets exposed | 728 MB | 20 languages; parallel streaming; ~1.4 GB RAM |
 | Qwen3-TTS 0.6B CustomVoice | Local companion | Optional | Planned | ~2.4 GB | Intended for newer/faster systems |
 | Microsoft Edge | Online | Supported | No | — | Free unofficial consumer endpoint |
 | ElevenLabs | Online | Supported | Yes | — | Subscription and API key required |
@@ -78,10 +79,12 @@ Azure, Google, AWS, OpenAI, Deepgram, Cartesia, PlayHT, and Resemble have
 catalog/provider scaffolding but are not advertised as working until each has
 passed credentialed end-to-end tests.
 
-MOSS-TTS-Nano is being reevaluated against its April 2026 ONNX release. A
-parallel two-stage benchmark reached RTF 0.86 and first PCM in 0.66 seconds on
-the i7-8650U test system; production support still needs a cancellable streaming
-adapter and reader testing. See [MOSS benchmark notes](docs/moss-benchmarks.md).
+MOSS-TTS-Nano uses a persistent, cancellable two-stage adapter. Generation and
+codec decoding run concurrently through bounded queues; unlike the upstream
+long-form helper, UtterMux does not add fixed silence between text chunks. A
+warm benchmark reached RTF 0.86 and first PCM in 0.66 seconds on the i7-8650U
+test system. It remains optional because its 728 MiB model and roughly 1.4 GiB
+working set are substantial. See [MOSS benchmark notes](docs/moss-benchmarks.md).
 
 Qwen works but is too slow for continuous reading on the older i7-8650U
 reference laptop. Faster CPUs and supported GPUs can run it at or above real
@@ -141,6 +144,7 @@ uttermux voices
 uttermux status --json
 uttermux model list
 uttermux model install vits-inflect-en-nano-v2
+uttermux model install moss-tts-nano-100m-onnx
 uttermux preview sherpa/vits-inflect-en-nano-v2/default
 uttermux default sherpa/vits-inflect-en-nano-v2/default
 uttermux speak-selection
@@ -166,12 +170,30 @@ Advanced performance controls are available in both Settings and the CLI:
 | `pocket-num-steps` | 3 | Pocket quality/latency tradeoff |
 | `pocket-chunk-size` | 4 | Pocket continuity/responsiveness tradeoff |
 | `zipvoice-num-steps` | 4 | ZipVoice quality/latency tradeoff |
+| `moss-threads` | 2 | Threads for each concurrent MOSS ONNX stage |
+| `moss-batch-frames` | 4 | MOSS first-audio latency versus decode throughput |
 | `max-loaded-models` | 2 | Warm-model count versus RAM use |
 
 For example, `uttermux setting local-threads 2` applies the new value and
 reloads the broker. The GUI batches all advanced changes and reloads only once.
-MOSS uses a separate two-stage pipeline and will receive independent generation
-and decoder controls when that backend is promoted to supported status.
+MOSS has independent settings because increasing the normal sherpa thread count
+does not tune its concurrent generator/decoder pipeline.
+
+## Model variants and custom models
+
+Catalog entries represent concrete artifacts, not only model families. Several
+variants of one family—FP32, FP16, INT8, small, medium, or high-quality—can
+coexist. The manager shows download size, estimated working memory,
+quantization, and measured performance class, and can sort by download or RAM.
+A hardware recommender can use those fields plus CPU features and available
+memory; it should recommend a variant, never silently download one.
+
+Custom sherpa-onnx models can be registered with a schema-1 manifest in
+`~/.config/uttermux/models.d/`. A custom model is data plus declarative paths;
+UtterMux does not execute installer commands from user catalogs. The planned
+GUI importer will validate the engine, BCP-47 voice metadata, required files,
+and paths. Downloadable third-party catalogs will require fixed HTTPS URLs and
+SHA-256 hashes.
 
 ## Language routing
 

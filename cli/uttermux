@@ -106,6 +106,8 @@ def render_config(doc: dict) -> str:
              f'pocket_num_steps = {int(doc.get("pocket_num_steps", 3))}',
              f'pocket_chunk_size = {int(doc.get("pocket_chunk_size", 4))}',
              f'zipvoice_num_steps = {int(doc.get("zipvoice_num_steps", 4))}',
+             f'moss_threads = {int(doc.get("moss_threads", 2))}',
+             f'moss_batch_frames = {int(doc.get("moss_batch_frames", 4))}',
              f'preload_default_voice = {str(bool(doc.get("preload_default_voice", False))).lower()}']
     for key in ("default_voice", "fallback_voice"):
         if doc.get(key): lines.append(f'{key} = {quote(doc[key])}')
@@ -160,6 +162,7 @@ def setup(_args):
     doc.setdefault("pocket_num_steps", 3)
     doc.setdefault("pocket_chunk_size", 4)
     doc.setdefault("zipvoice_num_steps", 4)
+    doc.setdefault("moss_threads", 2); doc.setdefault("moss_batch_frames", 4)
     doc.setdefault("preload_default_voice", False)
     doc.setdefault("fallback_voice", "sherpa/vits-piper-en_US-lessac-medium/lessac")
     doc.setdefault("default_voice", doc["fallback_voice"])
@@ -226,11 +229,11 @@ def cmd_catalog(_args):
     models, catalog_voices = [], []
     for item in local_catalog():
         languages = item.get("languages") or sorted({voice.get("language", "und") for voice in item.get("voices", [])})
-        is_qwen = item["engine"] == "qwen"
-        installed = (any(record["provider"] == "qwen" for record in ready.values()) if is_qwen else
+        companion = item["engine"] if item.get("external_installer") else ""
+        installed = (any(record["provider"] == companion for record in ready.values()) if companion else
                      item["id"] in installed_model_ids)
         models.append({
-            "id": item["id"], "providerId": "qwen" if is_qwen else "local",
+            "id": item["id"], "providerId": companion or "local",
             "library": item.get("family", item["engine"]),
             "version": item.get("version", "1"), "engine": item["engine"], "location": "on-device",
             "languages": languages, "capabilities": item.get("capabilities", []),
@@ -242,7 +245,7 @@ def cmd_catalog(_args):
             "license": item.get("license", ""), "sourceUrl": item.get("source_url", item.get("url", "")),
         })
         for voice in item.get("voices", []):
-            voice_id = f"qwen/{voice['id']}" if is_qwen else f"sherpa/{item['id']}/{voice['id']}"
+            voice_id = f"{companion}/{voice['id']}" if companion else f"sherpa/{item['id']}/{voice['id']}"
             catalog_voices.append({"id": voice_id, "modelId": item["id"],
                 "speakerId": str(voice.get("speaker_id", 0)), "name": voice["name"],
                 "languages": voice.get("languages", [voice.get("language", "und")]),
@@ -250,16 +253,18 @@ def cmd_catalog(_args):
                 ("sample" if voice.get("preview_url") else "unavailable"),
                 "previewUrl": voice.get("preview_url", ""), "ready": voice_id in ready})
     provider_names = {"local": ("Local models", False, "free"), "qwen": ("Qwen local", False, "free"),
+                      "moss": ("MOSS local", False, "free"),
                       "edge": ("Microsoft Edge", True, "free"),
                       "elevenlabs": ("ElevenLabs", True, "subscription"), "grok": ("xAI", True, "metered")}
     providers = [{"id": key, "name": values[0], "network": values[1], "cost": values[2],
-                  "enabled": key in {"local", "qwen"} or bool(read_config().get("providers", {}).get(key, {}).get("enabled"))}
+                  "enabled": key in {"local", "qwen", "moss"} or bool(read_config().get("providers", {}).get(key, {}).get("enabled"))}
                  for key, values in provider_names.items()]
     local_ids = {voice["id"] for voice in catalog_voices}
     for record in ready.values():
         if record["id"] in local_ids: continue
-        if record["provider"] == "qwen" and any(model["engine"] == "qwen" for model in models):
-            catalog_voices.append({"id": record["id"], "modelId": "qwen3-tts-0.6b-customvoice",
+        if record["provider"] in {"qwen", "moss"} and any(model["engine"] == record["provider"] for model in models):
+            model_id = next(model["id"] for model in models if model["engine"] == record["provider"])
+            catalog_voices.append({"id": record["id"], "modelId": model_id,
                 "speakerId": record["id"].split("/")[-1], "name": record["name"],
                 "languages": record["languages"], "preview": "generated", "ready": True})
             continue
@@ -271,7 +276,7 @@ def cmd_catalog(_args):
             continue
         model_id = f"{record['provider']}/{record['model']}"
         if not any(model["id"] == model_id for model in models):
-            local_companion = record["provider"] == "qwen"
+            local_companion = record["provider"] in {"qwen", "moss"}
             models.append({"id": model_id, "providerId": record["provider"], "library": record["model"],
                 "version": "companion" if local_companion else "service", "engine": record["provider"],
                 "location": "on-device" if local_companion else "cloud",
@@ -358,6 +363,10 @@ def cmd_settings_schema(_args):
                             "value": int(document.get("pocket_chunk_size", 4))},
         "zipvoiceNumSteps": {"type": "integer", "minimum": 1, "maximum": 8, "default": 4,
                              "value": int(document.get("zipvoice_num_steps", 4))},
+        "mossThreads": {"type": "integer", "minimum": 1, "maximum": 8, "default": 2,
+                        "value": int(document.get("moss_threads", 2))},
+        "mossBatchFrames": {"type": "integer", "minimum": 1, "maximum": 16, "default": 4,
+                            "value": int(document.get("moss_batch_frames", 4))},
         "preloadDefaultVoice": {"type": "boolean", "default": False,
                                 "value": bool(document.get("preload_default_voice", False))},
         "autoDetectLanguage": {"type": "boolean", "default": True,
@@ -579,6 +588,10 @@ def cmd_setting(args):
         doc["pocket_chunk_size"] = max(1, min(16, int(args.value)))
     elif args.name == "zipvoice-num-steps":
         doc["zipvoice_num_steps"] = max(1, min(8, int(args.value)))
+    elif args.name == "moss-threads":
+        doc["moss_threads"] = max(1, min(8, int(args.value)))
+    elif args.name == "moss-batch-frames":
+        doc["moss_batch_frames"] = max(1, min(16, int(args.value)))
     elif args.name == "language-minimum-characters":
         doc.setdefault("routing", {})["minimum_characters"] = max(10, min(500, int(args.value)))
     elif args.name == "language-minimum-confidence":
@@ -617,11 +630,13 @@ def cmd_eleven_voice(args):
 
 
 def cmd_model(args):
-    if args.model_id == "qwen3-tts-0.6b-customvoice":
+    item = next((item for item in local_catalog() if item["id"] == args.model_id), None)
+    if item and item.get("external_installer"):
         if args.action != "install":
-            raise RuntimeError("Qwen removal is not automated yet; profiles and model data are preserved")
-        installer = Path("/usr/lib/uttermux/install-qwen")
-        if not installer.exists(): installer = Path(__file__).resolve().parents[1] / "scripts/install-qwen"
+            raise RuntimeError(f"{item['family']} removal is not automated; model data is preserved")
+        name = str(item["external_installer"])
+        installer = Path("/usr/lib/uttermux") / name
+        if not installer.exists(): installer = Path(__file__).resolve().parents[1] / "scripts" / name
         subprocess.run([str(installer)], check=True)
         return
     manager = Path("/usr/lib/uttermux/model-manager")
@@ -646,11 +661,15 @@ def cmd_preview(args):
         for kind, raw in transact(SPEAK, payload):
             if kind == AUDIO_START:
                 if len(raw) < 5: raise RuntimeError("invalid audio header from broker")
-                sample_rate, channels = struct.unpack_from("<IB", raw)
-                player = (["paplay", "--raw", "--format=float32le", f"--rate={sample_rate}",
-                           f"--channels={channels}"] if GLib_find_program("paplay") else
-                          ["pw-play", "--format", "f32", "--rate", str(sample_rate),
-                           "--channels", str(channels), "-"])
+                sample_rate, sample_format = struct.unpack_from("<IB", raw)
+                formats = {1: ("float32le", "f32"), 2: ("s16le", "s16")}
+                if sample_format not in formats:
+                    raise RuntimeError(f"unsupported broker audio format: {sample_format}")
+                pulse_format, pipewire_format = formats[sample_format]
+                player = (["paplay", "--raw", f"--format={pulse_format}", f"--rate={sample_rate}",
+                           "--channels=1"] if GLib_find_program("paplay") else
+                          ["pw-play", "--format", pipewire_format, "--rate", str(sample_rate),
+                           "--channels", "1", "-"])
                 playback = subprocess.Popen(player, stdin=subprocess.PIPE)
             elif kind == AUDIO:
                 if not playback or not playback.stdin:
@@ -805,7 +824,8 @@ def main():
     p = sub.add_parser("provider-default"); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
     p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb",
         "local-threads", "local-silence-scale", "pocket-num-steps", "pocket-chunk-size",
-        "zipvoice-num-steps", "auto-detect-language", "language-minimum-characters",
+        "zipvoice-num-steps", "moss-threads", "moss-batch-frames",
+        "auto-detect-language", "language-minimum-characters",
         "language-minimum-confidence", "cross-language-fallback", "preload-default-voice"));
     p.add_argument("value"); p.add_argument("--defer-restart", action="store_true"); p.set_defaults(func=cmd_setting)
     sub.add_parser("reload").set_defaults(func=cmd_reload)
