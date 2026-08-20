@@ -36,3 +36,20 @@ jobs:
       - run: DESTDIR="$PWD/stage" cmake --install build-prefix
       - run: test -x stage/opt/uttermux/lib64/uttermux/uttermuxd
       - run: grep -F 'ExecStart=/opt/uttermux/lib64/uttermux/uttermuxd' stage/opt/uttermux/lib/systemd/user/uttermux.service
+
+  debian-build:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - run: apt-get update
+      - name: Install dependencies
+        run: >-
+          apt-get install -y --no-install-recommends git ca-certificates cmake ninja-build
+          g++ pkg-config python3 libspeechd-dev libspeechd-module0
+          librubberband-dev
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - run: DESTDIR="$PWD/stage" cmake --install build
+      - run: test -x stage/usr/local/lib/speech-dispatcher/speech-dispatcher-modules/sd_uttermux

@@ -207,12 +207,14 @@ SHA-256 hashes.
 
 ## Distribution support
 
-Arch Linux is currently the only tested and packaged desktop target. The core
+Arch Linux is currently the only locally tested and packaged desktop target. The core
 uses standard CMake, GTK 4, Speech Dispatcher 0.12+, ONNX Runtime, Rubber Band,
 Python, and systemd user services, so it should be portable to current
-systemd-based distributions. However, Debian/Ubuntu, Fedora, openSUSE, NixOS,
-Flatpak, non-systemd sessions, and installations under `/usr/local` are not yet
-release-supported because they lack packages and automated integration tests.
+systemd-based distributions. Debian trixie source builds and staged installs
+are exercised in CI, but no `.deb` repository is published yet. Ubuntu,
+Fedora, openSUSE, NixOS, Flatpak, and non-systemd sessions are not yet
+release-supported. `/usr/local` and alternate `lib64` prefixes are exercised by
+the portable-prefix CI job.
 
 ## Language routing
 
@@ -338,4 +340,6 @@ one highlighted utterance.
 ## License
 
 UtterMux is GPL-3.0-or-later. Models, provider services, and packaged
-dependencies retain their own licenses and terms.
+dependencies retain their own licenses and terms. See
+[model and service licensing](docs/MODEL_LICENSES.md) and the
+[security policy](SECURITY.md).
