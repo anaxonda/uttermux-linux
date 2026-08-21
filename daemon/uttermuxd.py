@@ -487,25 +487,31 @@ class ElevenLabsProvider:
 
     def _refresh_voices(self):
         """Merge the authenticated account catalog with configured imports."""
-        request = urllib.request.Request("https://api.elevenlabs.io/v1/voices", headers={
-            "xi-api-key": self.api_key, "Accept": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                document = json.load(response)
-        except (OSError, urllib.error.HTTPError, json.JSONDecodeError):
-            # A transient discovery failure must not disable explicitly imported
-            # voices or prevent the broker from starting offline.
-            return
-        for item in document.get("voices", []):
-            voice_id = item.get("voice_id") or item.get("id")
-            if not voice_id:
-                continue
-            labels = item.get("labels") or {}
-            locale = next((sample.get("locale") for sample in item.get("verified_languages", [])
-                           if sample.get("locale")), "")
-            language = normalize_language(locale or labels.get("language") or "en-US")
-            self._voices[voice_id] = {"id": voice_id, "name": item.get("name") or voice_id,
-                                      "language": language}
+        token = ""
+        while True:
+            query = {"page_size": 100, "sort": "name", "sort_direction": "asc"}
+            if token: query["next_page_token"] = token
+            request = urllib.request.Request(
+                "https://api.elevenlabs.io/v2/voices?" + urllib.parse.urlencode(query), headers={
+                    "xi-api-key": self.api_key, "Accept": "application/json"})
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    document = json.load(response)
+            except (OSError, urllib.error.HTTPError, json.JSONDecodeError):
+                # A transient discovery failure must not disable explicitly
+                # imported voices or prevent the broker from starting offline.
+                return
+            for item in document.get("voices", []):
+                voice_id = item.get("voice_id") or item.get("id")
+                if not voice_id: continue
+                labels = item.get("labels") or {}
+                locale = next((sample.get("locale") for sample in item.get("verified_languages", [])
+                               if sample.get("locale")), "")
+                language = normalize_language(locale or labels.get("language") or "en-US")
+                self._voices[voice_id] = {"id": voice_id, "name": item.get("name") or voice_id,
+                                          "language": language}
+            token = str(document.get("next_page_token") or "") if document.get("has_more") else ""
+            if not token: break
 
     def voices(self):
         for voice_id, voice in self._voices.items():

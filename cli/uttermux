@@ -282,10 +282,61 @@ def catalog_path() -> Path:
     return installed
 
 
+def generated_catalog_path() -> Path:
+    override = os.environ.get("UTTERMUX_GENERATED_CATALOG")
+    if override: return Path(override)
+    source = Path(__file__).resolve().parents[1] / "catalog/v2/catalog.json"
+    if source.is_file(): return source
+    return installed_data_file("catalog.json")
+
+
+def generated_linux_models() -> list[dict]:
+    path = generated_catalog_path()
+    if not path.is_file(): return []
+    try: document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError): return []
+    voices: dict[str, list[dict]] = {}
+    for voice in document.get("voices", []):
+        languages = voice.get("languages") or ["und"]
+        voices.setdefault(voice.get("variantId", ""), []).append({
+            "id": voice.get("id", "").split("/")[-1], "name": voice.get("name", ""),
+            "language": languages[0], "languages": languages,
+            "speaker_id": int(voice.get("speakerId", 0)),
+            "preview_url": voice.get("previewUrl", ""),
+            "reference_file": voice.get("referenceFile", ""),
+        })
+    result = []
+    for variant in document.get("variants", []):
+        if "linux" not in variant.get("platforms", []) or variant.get("status") == "unavailable": continue
+        bundle = next((item for item in variant.get("artifacts", []) if item.get("role") == "bundle"), {})
+        assets = [{"file": item.get("path", ""), "url": item.get("url", ""),
+                   "sha256": item.get("sha256", ""), "size": item.get("sizeBytes", 0)}
+                  for item in variant.get("artifacts", []) if item.get("role") == "asset"]
+        result.append({
+            "id": variant["id"], "engine": variant.get("engine", "vits"),
+            "family": next((item.get("library", "") for item in document.get("models", [])
+                            if item.get("id") == variant.get("modelId")), variant.get("modelId", "")),
+            "description": variant.get("description", ""), "platforms": variant.get("platforms", []),
+            "url": bundle.get("url", ""), "sha256": bundle.get("sha256", ""),
+            "size": bundle.get("sizeBytes", 0), "estimated_ram_mb": variant.get("estimatedRamMb", 0),
+            "quantization": variant.get("quantization", ""),
+            "performance_class": variant.get("performanceClass", "unknown"),
+            "license": variant.get("license", ""), "source_url": variant.get("sourceUrl", ""),
+            "capabilities": variant.get("capabilities", []), "languages": variant.get("languages", []),
+            "files": variant.get("files", {}), "assets": assets,
+            "voices": voices.get(variant["id"], []),
+            **({"external_installer": variant["externalInstaller"]} if variant.get("externalInstaller") else {}),
+        })
+    return result
+
+
 def local_catalog() -> list[dict]:
     path = catalog_path()
-    if not path.is_file(): return []
-    with path.open("rb") as stream: return tomllib.load(stream).get("model", [])
+    curated = []
+    if path.is_file():
+        with path.open("rb") as stream: curated = tomllib.load(stream).get("model", [])
+    known = {item["id"] for item in curated}
+    return curated + [item for item in generated_linux_models() if item["id"] not in known]
 
 
 def hardware_profile() -> dict:
@@ -599,9 +650,8 @@ def cmd_discover(args):
                     "accent": (match or {}).get("accent") or voice.get("accent", ""),
                     "description": voice.get("description", ""), "preview_url": (match or {}).get("preview_url") or voice.get("preview_url", "")})
     if args.provider in (None, "local"):
-        local_path = catalog_path()
-        if local_path.is_file():
-            with local_path.open("rb") as stream: catalog = tomllib.load(stream)
+        catalog = {"model": local_catalog()}
+        if catalog["model"]:
             installed = {record["id"] for record in voice_records() if record["provider"] == "local"}
             for model in catalog.get("model", []):
                 for voice in model.get("voices", []):

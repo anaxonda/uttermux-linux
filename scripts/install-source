@@ -20,14 +20,18 @@ trap 'rm -rf -- "$work"' EXIT
 printf '%s\n' 'Resolving the latest published UtterMux release…'
 curl --proto '=https' --tlsv1.2 -fsSL \
   https://api.github.com/repos/anaxonda/uttermux-linux/releases?per_page=10 -o "$work/releases.json"
-checksums_url=$(sed -n 's/.*"browser_download_url": "\([^"]*\/SHA256SUMS\)".*/\1/p' "$work/releases.json" | head -n1)
-archive_url=$(sed -n 's/.*"browser_download_url": "\([^"]*\/uttermux-linux-[^"]*\.tar\.gz\)".*/\1/p' "$work/releases.json" | head -n1)
-[[ -n "$checksums_url" && -n "$archive_url" ]] || { printf '%s\n' 'No complete source release was found.' >&2; exit 1; }
+tag=$(sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' "$work/releases.json" | head -n1)
+[[ "$tag" =~ ^v[0-9A-Za-z._-]+$ ]] || { printf '%s\n' 'Could not resolve a safe release tag.' >&2; exit 1; }
+version=${tag#v}
+checksums_url="$repo/releases/download/$tag/SHA256SUMS"
+archive_url="$repo/releases/download/$tag/uttermux-linux-$version.tar.gz"
 curl --proto '=https' --tlsv1.2 -fsSL "$checksums_url" -o "$work/SHA256SUMS"
 archive=${archive_url##*/}
 [[ -n "$archive" ]] || { printf '%s\n' 'Release checksum manifest has no source archive.' >&2; exit 1; }
 curl --proto '=https' --tlsv1.2 -fL "$archive_url" -o "$work/$archive"
-(cd "$work" && sha256sum --check --ignore-missing SHA256SUMS)
+expected=$(awk -v file="$archive" '$2 == file {print $1}' "$work/SHA256SUMS")
+[[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { printf '%s\n' "No checksum was published for $archive." >&2; exit 1; }
+(cd "$work" && printf '%s  %s\n' "$expected" "$archive" | sha256sum --check)
 tar -xzf "$work/$archive" -C "$work"
 source_root=$(find "$work" -mindepth 1 -maxdepth 1 -type d -name 'uttermux-linux-*' -print -quit)
 [[ -n "$source_root" ]] || { printf '%s\n' 'Could not locate extracted UtterMux source.' >&2; exit 1; }

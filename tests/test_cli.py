@@ -162,6 +162,8 @@ class CliTests(unittest.TestCase):
         try:
             catalog = sv.load_catalog()
             self.assertIn("kokoro-multi-lang-v1_0", catalog)
+            self.assertIn("vits-piper-en_GB-alan-low", catalog)
+            self.assertEqual("Alan", catalog["vits-piper-en_GB-alan-low"]["voices"][0]["name"])
             self.assertEqual(catalog["moss-tts-nano-100m-onnx"]["external_installer"], "install-moss")
             self.assertEqual(catalog["kokoro-multi-lang-v1_0"]["voices"][0]["language"], "en-US")
             for item in catalog.values():

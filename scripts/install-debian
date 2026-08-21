@@ -14,5 +14,8 @@ sudo apt-get install -y --no-install-recommends \
   ffmpeg libgtk-4-1 python3-gi python3-numpy python3-aiohttp python3-certifi \
   pulseaudio-utils wl-clipboard xclip
 
-exec bash < <(curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-  https://github.com/anaxonda/uttermux-linux/raw/main/scripts/install-source)
+work=$(mktemp -d "${TMPDIR:-/tmp}/uttermux-debian.XXXXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+  https://github.com/anaxonda/uttermux-linux/raw/main/scripts/install-source -o "$work/install-source"
+bash "$work/install-source"

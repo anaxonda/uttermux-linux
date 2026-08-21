@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -46,12 +47,56 @@ def catalog_path() -> Path:
     return source
 
 
+def generated_catalog_path() -> Path:
+    override = os.environ.get("UTTERMUX_GENERATED_CATALOG")
+    if override: return Path(override)
+    source = Path(__file__).resolve().parents[1] / "catalog" / "v2" / "catalog.json"
+    if source.is_file(): return source
+    prefix = Path(__file__).resolve().parent.parent
+    for installed in (prefix / "share" / APP / "catalog.json",
+                      Path("/usr/share") / APP / "catalog.json",
+                      Path("/usr/local/share") / APP / "catalog.json"):
+        if installed.exists(): return installed
+    return source
+
+
+def generated_linux_catalog() -> dict[str, dict]:
+    path = generated_catalog_path()
+    if not path.is_file(): return {}
+    document = json.loads(path.read_text(encoding="utf-8"))
+    model_names = {item["id"]: item.get("library", item["id"]) for item in document.get("models", [])}
+    voices: dict[str, list[dict]] = {}
+    for voice in document.get("voices", []):
+        languages = voice.get("languages") or ["und"]
+        voices.setdefault(voice.get("variantId", ""), []).append({
+            "id": voice.get("id", "").split("/")[-1], "name": voice.get("name", ""),
+            "language": languages[0], "speaker_id": int(voice.get("speakerId", 0)),
+            "reference_file": voice.get("referenceFile", ""),
+        })
+    result = {}
+    for variant in document.get("variants", []):
+        if "linux" not in variant.get("platforms", []) or variant.get("status") == "unavailable": continue
+        bundle = next((item for item in variant.get("artifacts", []) if item.get("role") == "bundle"), {})
+        result[variant["id"]] = {
+            "id": variant["id"], "engine": variant.get("engine", "vits"),
+            "family": model_names.get(variant.get("modelId", ""), variant.get("modelId", "")),
+            "url": bundle.get("url", ""), "sha256": bundle.get("sha256", ""),
+            "size": bundle.get("sizeBytes", 0), "files": variant.get("files", {}),
+            "assets": [{"file": item.get("path", ""), "url": item.get("url", ""),
+                        "sha256": item.get("sha256", ""), "size": item.get("sizeBytes", 0)}
+                       for item in variant.get("artifacts", []) if item.get("role") == "asset"],
+            "voices": voices.get(variant["id"], []),
+        }
+    return result
+
+
 def load_catalog() -> dict[str, dict]:
     with catalog_path().open("rb") as f:
         doc = tomllib.load(f)
     if doc.get("schema_version") != 1:
         raise RuntimeError("unsupported catalog schema")
-    return {item["id"]: item for item in doc.get("model", [])}
+    curated = {item["id"]: item for item in doc.get("model", [])}
+    return generated_linux_catalog() | curated
 
 
 def q(value: str | Path) -> str:

@@ -145,6 +145,18 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(body["output_format"], {"codec": "pcm", "sample_rate": 24000})
         self.assertTrue(emitted)
 
+    def test_elevenlabs_uses_v2_catalog_and_paginates(self):
+        first = mock.MagicMock(); first.__enter__.return_value = io.BytesIO(
+            b'{"voices":[{"voice_id":"a","name":"Alice","labels":{"language":"en-US"}}],"has_more":true,"next_page_token":"next"}')
+        second = mock.MagicMock(); second.__enter__.return_value = io.BytesIO(
+            b'{"voices":[{"voice_id":"b","name":"Bella","labels":{"language":"fr-FR"}}],"has_more":false}')
+        with mock.patch("pathlib.Path.read_text", return_value="secret\n"), \
+             mock.patch.object(self.u.urllib.request, "urlopen", side_effect=[first, second]) as open_url:
+            provider = self.u.ElevenLabsProvider({"voices": []})
+        self.assertEqual({record[0] for record in provider.voices()}, {"elevenlabs/a", "elevenlabs/b"})
+        self.assertIn("/v2/voices?", open_url.call_args_list[0].args[0].full_url)
+        self.assertIn("next_page_token=next", open_url.call_args_list[1].args[0].full_url)
+
     def test_qwen_uses_streaming_local_endpoint_and_language(self):
         provider = object.__new__(self.u.QwenProvider)
         provider.port = 17872

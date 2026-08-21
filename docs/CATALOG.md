@@ -19,9 +19,11 @@ thousands of Piper speaker rows.
 URLs, SHA-256 hashes, sizes, licenses, and provenance are release data. CI fails
 when either generated file is stale.
 
-Linux currently reads the reviewed TOML catalog at runtime and installs the
-schema-2 JSON as the cross-platform contract. Android embeds a checksum-locked
-copy of the JSON and projects only variants marked for Android. Platform code
+Linux merges the hand-reviewed TOML entries with Linux-eligible variants from
+the generated schema-2 JSON. The generated projection supplies the complete
+pinned Piper catalog, while a curated TOML entry with the same ID can override
+runtime details. Android embeds a checksum-locked copy of the JSON and projects
+only variants marked for Android. Platform code
 may expand speakers from model metadata or deliberately expose a reviewed
 subset, so the number of explicit JSON voice records is not an exhaustive UI
 voice count. The projects share stable identity and artifact metadata while

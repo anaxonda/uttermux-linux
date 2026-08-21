@@ -238,7 +238,21 @@ class VoicePage(Gtk.Box):
             elif model.get("location") == "on-device":
                 install = Gtk.Button(label="Download"); install.connect("clicked", self.install, record); row.append(install)
             self.listbox.append(row)
-        self.status.set_text(f"{len(result)} voice{'s' if len(result) != 1 else ''}")
+        if result:
+            self.status.set_text(f"{len(result)} voice{'s' if len(result) != 1 else ''}")
+        else:
+            active = []
+            if self.search.get_text().strip(): active.append(f'search “{self.search.get_text().strip()}”')
+            for key in ("language", "provider", "model"):
+                value = self.dropdown_value(key)
+                if value: active.append(f"{key} {value}")
+            labels = ((self.location, ("", "Offline", "Online")),
+                      (self.readiness, ("", "Ready", "Downloadable")),
+                      (self.performance, ("", "Fast", "Balanced", "Heavy", "Cloud")))
+            for widget, values in labels:
+                if widget.get_selected(): active.append(values[widget.get_selected()])
+            detail = f" Active filters: {', '.join(active)}." if active else ""
+            self.status.set_text(f"No matching voices.{detail} Use Clear filters to show the full catalog.")
 
     def choose(self, _button, record): self.window.run_task(command("default", record["id"]), "Voice selected", self.load)
     def preview(self, button, record, spinner):

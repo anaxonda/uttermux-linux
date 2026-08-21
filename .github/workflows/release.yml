@@ -31,11 +31,17 @@ jobs:
           sha256sum "uttermux-linux-${GITHUB_REF_NAME#v}.tar.gz" > SHA256SUMS
       - name: Resolve Arch package checksums
         run: |
+          release_version="${GITHUB_REF_NAME#v}"
+          package_version="${release_version//-/_}"
           project_sha=$(sha256sum "uttermux-linux-${GITHUB_REF_NAME#v}.tar.gz" | cut -d' ' -f1)
           curl -fL --retry 3 -o sherpa-onnx-1.13.6.tar.gz https://github.com/k2-fsa/sherpa-onnx/archive/refs/tags/v1.13.6.tar.gz
           sherpa_sha=$(sha256sum sherpa-onnx-1.13.6.tar.gz | cut -d' ' -f1)
-          sed -e "s/PROJECT_SHA256/$project_sha/" -e "s/SHERPA_SHA256/$sherpa_sha/" packaging/arch/PKGBUILD > PKGBUILD
-          ! grep -Eq 'SKIP|PROJECT_SHA256|SHERPA_SHA256' PKGBUILD
+          sed -e "s/PACKAGE_VERSION/$package_version/" \
+              -e "s/RELEASE_VERSION/$release_version/" \
+              -e "s/RELEASE_TAG/$GITHUB_REF_NAME/" \
+              -e "s/PROJECT_SHA256/$project_sha/" \
+              -e "s/SHERPA_SHA256/$sherpa_sha/" packaging/arch/PKGBUILD.in > PKGBUILD
+          ! grep -Eq 'PACKAGE_VERSION|RELEASE_VERSION|RELEASE_TAG|PROJECT_SHA256|SHERPA_SHA256|(^|[^A-Z])SKIP([^A-Z]|$)' PKGBUILD
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}

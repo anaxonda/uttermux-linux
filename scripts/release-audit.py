@@ -52,14 +52,16 @@ def main() -> int:
     if not installer.is_file() or not installer.stat().st_mode & 0o111:
         errors.append("install.sh is missing or not executable")
     if not (ROOT / "LICENSE").is_file(): errors.append("LICENSE is missing")
-    # Tag automation resolves these template values and publishes the resulting
-    # PKGBUILD beside the deterministic source archive. Keep ordinary CI useful
-    # while making a manual release audit fail on the unresolved template.
     pkgbuild = (ROOT / "packaging/arch/PKGBUILD").read_text()
-    placeholders = ("SKIP", "PROJECT_SHA256", "SHERPA_SHA256")
-    if not args.ci and (any(item in pkgbuild for item in placeholders) or
-                        "github.com/anaxonda/uttermux-linux" not in pkgbuild):
-        errors.append("Arch package still has placeholder repository URL or hashes")
+    placeholders = ("PACKAGE_VERSION", "RELEASE_VERSION", "RELEASE_TAG", "PROJECT_SHA256", "SHERPA_SHA256")
+    if any(item in pkgbuild for item in placeholders) or "github.com/anaxonda/uttermux-linux" not in pkgbuild:
+        errors.append("checked-in Arch PKGBUILD has unresolved release metadata")
+    template = (ROOT / "packaging/arch/PKGBUILD.in").read_text()
+    for item in placeholders:
+        if item not in template: errors.append(f"Arch release template is missing {item}")
+    workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    if "packaging/arch/PKGBUILD.in" not in workflow:
+        errors.append("release workflow does not render the Arch package template")
     for error in errors: print(f"ERROR: {error}", file=sys.stderr)
     return 1 if errors else 0
 

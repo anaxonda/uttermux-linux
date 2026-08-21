@@ -183,6 +183,9 @@ builds the pinned sherpa-onnx dependency, installs through `makepkg`, runs
 `uttermux setup`, and finishes with `uttermux doctor`. Review
 [`install.sh`](install.sh) before piping it to a shell.
 
+To download and verify every pinned Arch source without building or installing,
+run the command with `UTTERMUX_INSTALL_CHECK_ONLY=1`.
+
 ### Debian and Ubuntu
 
 The same one-line command installs build/runtime packages through `apt`, builds
@@ -210,6 +213,8 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 The generic installer verifies the published source checksum, builds the pinned
 sherpa-onnx runtime, runs tests, and invokes `sudo` only for installation.
+Set `UTTERMUX_INSTALL_CHECK_ONLY=1` to verify the release archive without
+building or installing it.
 
 ### Build from source
 
