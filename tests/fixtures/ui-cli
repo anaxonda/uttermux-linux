@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Deterministic read-only CLI fixture for public UI screenshots."""
+
+import json
+import sys
+
+models = [
+    {"id":"kokoro-multi-lang-v1_0","name":"Kokoro 82M FP32","library":"Kokoro","providerId":"local","location":"on-device","downloadSizeMb":333,"estimatedRamMb":560,"quantization":"FP32","performanceClass":"balanced","recommendation":"likely-usable","recommendationReason":"Expected to work well after the first model load.","engine":"kokoro","version":"1.0"},
+    {"id":"sherpa-onnx-pocket-tts-int8-2026-01-26","name":"Pocket TTS INT8","library":"Pocket","providerId":"local","location":"on-device","downloadSizeMb":176,"estimatedRamMb":420,"quantization":"INT8","performanceClass":"balanced","recommendation":"recommended","recommendationReason":"Expected to be responsive with CPU inference.","engine":"pocket","version":"2026-01"},
+    {"id":"edge-neural","name":"Edge Neural","library":"Edge","providerId":"edge","location":"cloud","performanceClass":"cloud","recommendation":"available","recommendationReason":"Available while online."},
+    {"id":"eleven-flash","name":"Eleven Flash v2.5","library":"ElevenLabs","providerId":"elevenlabs","location":"cloud","performanceClass":"cloud","recommendation":"available","recommendationReason":"Available with configured credentials."},
+]
+voices = [
+    {"id":"local/kokoro-multi-lang-v1_0/bella","name":"Bella · Kokoro","modelId":"kokoro-multi-lang-v1_0","languages":["en-US"],"ready":True},
+    {"id":"local/kokoro-multi-lang-v1_0/heart","name":"Heart · Kokoro","modelId":"kokoro-multi-lang-v1_0","languages":["en-US"],"ready":True},
+    {"id":"local/sherpa-onnx-pocket-tts-int8-2026-01-26/alba","name":"Alba Casual · Pocket","modelId":"sherpa-onnx-pocket-tts-int8-2026-01-26","languages":["en-US"],"ready":True},
+    {"id":"local/sherpa-onnx-pocket-tts-int8-2026-01-26/mary","name":"Mary · Pocket","modelId":"sherpa-onnx-pocket-tts-int8-2026-01-26","languages":["en-US"],"ready":True},
+    {"id":"edge/fr-FR-DeniseNeural","name":"Denise · Edge","modelId":"edge-neural","languages":["fr-FR"],"ready":True},
+    {"id":"elevenlabs/bill","name":"Bill · ElevenLabs","modelId":"eleven-flash","languages":["en-US","fr-FR"],"ready":True},
+]
+providers = [
+    {"id":"local","name":"Local models","enabled":True},
+    {"id":"edge","name":"Microsoft Edge","enabled":True},
+    {"id":"elevenlabs","name":"ElevenLabs","enabled":True},
+    {"id":"grok","name":"xAI / Grok","enabled":False},
+]
+playback = {name:{"value":value} for name,value in {
+    "autoDetectLanguage":True,"preloadDefaultVoice":True,"localThreads":0,"pocketThreads":0,
+    "localSilenceScale":0.2,"pocketNumSteps":3,"pocketChunkSize":4,"zipvoiceNumSteps":4,
+    "mossThreads":0,"mossBatchFrames":4,"externalIdleSeconds":120,"maxLoadedModels":2,
+    "audioCacheMb":64,"languageMinimumCharacters":40,"languageMinimumConfidence":0.8,
+    "crossLanguageFallback":True}.items()}
+
+args = sys.argv[1:]
+if args == ["catalog"]: value={"providers":providers,"models":models,"voices":voices,"profiles":[]}
+elif args == ["status"]: value={"configuredDefault":"local/kokoro-multi-lang-v1_0/bella"}
+elif args == ["profiles"]: value=[]
+elif args == ["settings-schema"]: value={"playback":playback}
+elif args in (["tuning","list"],["model-setting","list"]): value={}
+else: sys.exit("UI screenshot fixture is read-only")
+print(json.dumps(value))

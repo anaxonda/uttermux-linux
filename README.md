@@ -18,6 +18,10 @@ online providers use the same voice selection and language-routing rules.
 
 ![UtterMux desktop voice catalog](docs/screenshots/linux-voices.png)
 
+Maintainers can reproduce all four desktop screenshots with
+`scripts/capture-linux-screenshots`. On Arch, the capture-only dependencies are
+`xorg-server-xvfb`, `xorg-xwininfo`, and `imagemagick`; synthesis is not invoked.
+
 ## Why UtterMux?
 
 Linux TTS tools usually support one engine or one application. UtterMux keeps
@@ -476,6 +480,7 @@ python -m py_compile cli/uttermux daemon/uttermuxd.py ui/uttermux-app.py
 Architecture and benchmark notes:
 
 - [Android/desktop catalog contract](docs/DESKTOP_PARITY.md)
+- [Catalog generation and synchronization](docs/CATALOG.md)
 - [Catalog schema v2](docs/interop/catalog-v2.schema.json)
 - [Generated complete model index](docs/MODELS.generated.md)
 - [MOSS-TTS-Nano experiments](docs/moss-benchmarks.md)

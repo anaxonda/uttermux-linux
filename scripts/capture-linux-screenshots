@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+fixture="$root/tests/fixtures/ui-cli"
+output=${1:-"$root/docs/screenshots"}
+
+for command in xvfb-run xwininfo import; do
+  command -v "$command" >/dev/null || {
+    printf 'Missing %s. On Arch install: sudo pacman -S --needed xorg-server-xvfb xorg-xwininfo imagemagick\n' "$command" >&2
+    exit 2
+  }
+done
+
+mkdir -p "$output"
+for page in voices create tune settings; do
+  target="$output/linux-$page.png"
+  ROOT="$root" FIXTURE="$fixture" PAGE="$page" TARGET="$target" xvfb-run -a -s '-screen 0 1200x900x24' bash -c '
+    set -euo pipefail
+    export UTTERMUX_CLI="$FIXTURE" UTTERMUX_SCREENSHOT_PAGE="$PAGE"
+    export XDG_CONFIG_HOME="$PWD/config" XDG_DATA_HOME="$PWD/data" XDG_STATE_HOME="$PWD/state"
+    python "$ROOT/ui/uttermux-app.py" & app=$!
+    trap "kill $app 2>/dev/null || true" EXIT
+    window=
+    for _ in $(seq 1 80); do
+      window=$(xwininfo -root -tree 2>/dev/null | sed -n "s/^ *\(0x[0-9a-f]*\).*\"UtterMux\".*/\1/p" | head -n 1)
+      [[ -n "$window" ]] && break
+      sleep .1
+    done
+    [[ -n "$window" ]] || { echo "UtterMux window did not appear" >&2; exit 1; }
+    sleep .8
+    import -window "$window" "$TARGET"
+    test -s "$TARGET"
+  '
+done
+
+cp "$output/linux-voices.png" "$root/docs/screenshots/linux-voices.png"
+printf 'Captured Linux screenshots in %s\n' "$output"

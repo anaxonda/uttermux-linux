@@ -28,8 +28,13 @@ Updating a local model follows this sequence:
 2. Add the artifact and platform policy to a reviewed TOML source.
 3. Regenerate JSON and Markdown without network access.
 4. Run schema, checksum, synthesis, cancellation, and reader tests.
-5. Copy the accepted generated JSON into the Android repository when the
-   change affects Android.
+5. The Android repository's daily catalog-sync workflow pins the exact Linux
+   commit and opens a validated review PR when the generated JSON changes.
+
+Android stores the pinned commit, catalog hash, and generator provenance in
+`catalog.lock.json`. Its normal build validates the committed catalog entirely
+offline. The sync workflow is also manually dispatchable when a same-day update
+is wanted; application builds never pull a mutable `main` branch.
 
 ## Online-provider catalogs
 

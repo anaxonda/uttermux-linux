@@ -13,7 +13,8 @@ jobs:
       - name: Install dependencies
         run: >-
           pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf python
-          speech-dispatcher rubberband onnxruntime-cpu ffmpeg
+          speech-dispatcher rubberband onnxruntime-cpu ffmpeg python-gobject gtk4
+          xorg-server-xvfb xorg-xwininfo imagemagick
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
@@ -24,6 +25,10 @@ jobs:
         run: |
           python scripts/catalog/build_catalog.py --piper-source catalog/sources/piper.json --check
           python scripts/release-audit.py --ci
+      - name: Smoke-test deterministic screenshot capture
+        run: |
+          scripts/capture-linux-screenshots "$RUNNER_TEMP/uttermux-screenshots"
+          test "$(find "$RUNNER_TEMP/uttermux-screenshots" -name 'linux-*.png' | wc -l)" -eq 4
 
   portable-prefix:
     runs-on: ubuntu-latest

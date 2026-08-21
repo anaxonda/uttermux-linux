@@ -15,7 +15,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk
 
-CLI = Path(__file__).resolve().with_name("uttermux")
+CLI = Path(os.environ.get("UTTERMUX_CLI", "")) if os.environ.get("UTTERMUX_CLI") else Path(__file__).resolve().with_name("uttermux")
 if not CLI.exists(): CLI = Path(__file__).resolve().parents[1] / "cli/uttermux"
 if not CLI.exists(): CLI = Path("/usr/bin/uttermux")
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "uttermux/ui.json"
@@ -798,6 +798,8 @@ class Window(Gtk.ApplicationWindow):
         self.stack.add_titled(self.scrolled(CreatePage(self)), "create", "Create voice")
         self.test_page = TunePage(self); self.stack.add_titled(self.scrolled(self.test_page), "tune", "Test & tune")
         self.stack.add_titled(self.scrolled(SettingsPage(self)), "settings", "Settings"); self.set_child(self.stack)
+        page = os.environ.get("UTTERMUX_SCREENSHOT_PAGE", "")
+        if page in {"voices", "create", "tune", "settings"}: self.stack.set_visible_child_name(page)
 
     def show_test_page(self):
         self.stack.set_visible_child_name("tune")
