@@ -87,17 +87,20 @@ class CliTests(unittest.TestCase):
 
     def test_render_preserves_advanced_tuning(self):
         rendered = ut.render_config({
-            "local_threads": 2, "local_silence_scale": .1,
+            "local_threads": 2, "pocket_threads": 3, "local_silence_scale": .1,
             "pocket_num_steps": 5, "pocket_chunk_size": 8,
             "zipvoice_num_steps": 6, "moss_threads": 2, "moss_batch_frames": 4,
+            "external_idle_seconds": 90,
         })
         self.assertIn("local_threads = 2", rendered)
+        self.assertIn("pocket_threads = 3", rendered)
         self.assertIn("local_silence_scale = 0.1", rendered)
         self.assertIn("pocket_num_steps = 5", rendered)
         self.assertIn("pocket_chunk_size = 8", rendered)
         self.assertIn("zipvoice_num_steps = 6", rendered)
         self.assertIn("moss_threads = 2", rendered)
         self.assertIn("moss_batch_frames = 4", rendered)
+        self.assertIn("external_idle_seconds = 90", rendered)
 
     def test_short_text_is_not_auto_detected(self):
         language, confidence, reason = ut.detect_text("Bonjour.")

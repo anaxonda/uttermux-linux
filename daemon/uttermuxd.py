@@ -566,8 +566,32 @@ class QwenProvider:
         self.port = int(config.get("port", 17872))
         self.threads = max(1, int(config.get("threads", 4)))
         self.quantization = str(config.get("quantization", "int8"))
+        self.idle_seconds = max(0, int(config.get("idle_seconds", 120)))
+        self.idle_generation = 0
+        self.idle_timer: threading.Timer | None = None
         self.process: subprocess.Popen | None = None
         self.lock = threading.Lock()
+
+    def _schedule_idle_stop(self) -> None:
+        with self.lock:
+            if self.idle_timer: self.idle_timer.cancel()
+            self.idle_generation += 1
+            generation = self.idle_generation
+        if self.idle_seconds <= 0:
+            return
+        timer = threading.Timer(self.idle_seconds, self._stop_if_idle, (generation,))
+        timer.daemon = True
+        with self.lock: self.idle_timer = timer
+        timer.start()
+
+    def _stop_if_idle(self, generation: int) -> None:
+        with self.lock:
+            if generation != self.idle_generation:
+                return
+            self.idle_timer = None
+            if self.process and self.process.poll() is None:
+                self.process.terminate()
+            self.process = None
 
     def voices(self):
         capabilities = tuple(normalize_language(item) for item in self.LANGUAGES)
@@ -584,6 +608,8 @@ class QwenProvider:
 
     def _ensure_server(self, cancelled: threading.Event) -> None:
         with self.lock:
+            if self.idle_timer: self.idle_timer.cancel(); self.idle_timer = None
+            self.idle_generation += 1
             if self.process and self.process.poll() is None and self._health():
                 return
             if self.process and self.process.poll() is None:
@@ -639,6 +665,8 @@ class QwenProvider:
                 with self.lock:
                     if self.process and self.process.poll() is None:
                         self.process.terminate()
+            else:
+                self._schedule_idle_stop()
         if not started and not cancelled.is_set():
             raise RuntimeError("Qwen returned no audio")
 
@@ -669,8 +697,29 @@ class MossProvider:
         self.port = int(config.get("port", 17873))
         self.threads = max(1, int(config.get("threads", 2)))
         self.batch_frames = max(1, int(config.get("batch_frames", 4)))
+        self.idle_seconds = max(0, int(config.get("idle_seconds", 120)))
+        self.idle_generation = 0
+        self.idle_timer: threading.Timer | None = None
         self.process: subprocess.Popen | None = None
         self.lock = threading.Lock()
+
+    def _schedule_idle_stop(self):
+        with self.lock:
+            if self.idle_timer: self.idle_timer.cancel()
+            self.idle_generation += 1
+            generation = self.idle_generation
+        if self.idle_seconds <= 0: return
+        timer = threading.Timer(self.idle_seconds, self._stop_if_idle, (generation,))
+        timer.daemon = True
+        with self.lock: self.idle_timer = timer
+        timer.start()
+
+    def _stop_if_idle(self, generation):
+        with self.lock:
+            if generation != self.idle_generation: return
+            self.idle_timer = None
+            if self.process and self.process.poll() is None: self.process.terminate()
+            self.process = None
 
     def voices(self):
         capabilities = tuple(normalize_language(item) for item in self.LANGUAGES)
@@ -687,6 +736,8 @@ class MossProvider:
 
     def _ensure_server(self, cancelled):
         with self.lock:
+            if self.idle_timer: self.idle_timer.cancel(); self.idle_timer = None
+            self.idle_generation += 1
             if self.process and self.process.poll() is None and self._health(): return
             if self.process and self.process.poll() is None: self.process.terminate()
             self.process = subprocess.Popen([
@@ -732,6 +783,7 @@ class MossProvider:
                     emit(packet(AUDIO, 0, chunk))
         finally:
             if cancelled.is_set(): self._cancel()
+            else: self._schedule_idle_stop()
         if not started and not cancelled.is_set(): raise RuntimeError("MOSS returned no audio")
 
 
@@ -799,6 +851,9 @@ class Broker:
                 cfg = dict(cfg)
                 cfg.setdefault("threads", self.config.get("moss_threads", 2))
                 cfg.setdefault("batch_frames", self.config.get("moss_batch_frames", 4))
+            if provider_name in {"qwen", "moss"}:
+                cfg = dict(cfg)
+                cfg.setdefault("idle_seconds", self.config.get("external_idle_seconds", 120))
             if not cfg.get("enabled", provider_name in {"qwen", "moss"}):
                 continue
             try:
@@ -836,7 +891,8 @@ class Broker:
                 engine.lock.acquire()
                 return engine
             effective_model = dict(model)
-            effective_model["num_threads"] = int(self.config.get("local_threads", model.get("num_threads", 4)))
+            default_threads = self.config.get("pocket_threads", 2) if model.get("engine") == "pocket" else self.config.get("local_threads", model.get("num_threads", 4))
+            effective_model["num_threads"] = int(default_threads)
             effective_model["silence_scale"] = float(self.config.get("local_silence_scale", .2))
             effective_model["pocket_num_steps"] = int(self.config.get("pocket_num_steps", 3))
             effective_model["pocket_chunk_size"] = int(self.config.get("pocket_chunk_size", 4))

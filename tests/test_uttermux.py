@@ -132,6 +132,7 @@ class ProtocolTests(unittest.TestCase):
     def test_qwen_uses_streaming_local_endpoint_and_language(self):
         provider = object.__new__(self.u.QwenProvider)
         provider.port = 17872
+        provider.lock = threading.Lock(); provider.idle_seconds = 0; provider.idle_generation = 0; provider.idle_timer = None
         provider._ensure_server = mock.Mock()
         response = mock.MagicMock()
         response.__enter__.return_value = io.BytesIO(b"\0\1" * 100)
@@ -142,6 +143,16 @@ class ProtocolTests(unittest.TestCase):
         body = json.loads(open_url.call_args.args[0].data)
         self.assertEqual((body["speaker"], body["language"]), ("ryan", "French"))
         self.assertTrue(emitted)
+
+    def test_heavy_runtime_idle_generation_does_not_stop_reused_process(self):
+        provider = object.__new__(self.u.QwenProvider)
+        provider.lock = threading.Lock(); provider.idle_generation = 2; provider.idle_timer = None
+        process = provider.process = mock.MagicMock(); process.poll.return_value = None
+        provider._stop_if_idle(1)
+        process.terminate.assert_not_called()
+        provider._stop_if_idle(2)
+        process.terminate.assert_called_once()
+        self.assertIsNone(provider.process)
 
     def test_sherpa_forwards_completed_audio_when_engine_does_not_stream(self):
         samples = (ctypes.c_float * 3)(.25, -.5, .75)
@@ -177,7 +188,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_broker_applies_global_local_tuning_to_new_engine(self):
         broker = object.__new__(self.u.Broker)
-        broker.config = {"local_threads": 2, "local_silence_scale": .1,
+        broker.config = {"local_threads": 2, "pocket_threads": 3, "local_silence_scale": .1,
                          "pocket_num_steps": 5, "pocket_chunk_size": 8,
                          "zipvoice_num_steps": 6}
         broker.engine_lock = threading.Lock(); broker.engines = OrderedDict()
@@ -188,7 +199,7 @@ class ProtocolTests(unittest.TestCase):
             result = broker.engine(model)
         effective = constructor.call_args.args[1]
         self.assertIs(result, fake)
-        self.assertEqual((effective["num_threads"], effective["silence_scale"]), (2, .1))
+        self.assertEqual((effective["num_threads"], effective["silence_scale"]), (3, .1))
         self.assertEqual((effective["pocket_num_steps"], effective["pocket_chunk_size"]), (5, 8))
         self.assertEqual(effective["zipvoice_num_steps"], 6)
         result.lock.release()

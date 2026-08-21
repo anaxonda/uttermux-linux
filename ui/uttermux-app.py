@@ -394,7 +394,9 @@ class SettingsPage(Gtk.Box):
         performance_heading = Gtk.Label(label="Local inference", xalign=0); performance_heading.add_css_class("heading")
         box.append(performance_heading)
         self.local_threads = Gtk.SpinButton.new_with_range(1, 16, 1)
-        box.append(self.setting_row("ONNX CPU threads", "Four is recommended on this computer. More can be slower on older CPUs; changes reload local models.", self.local_threads))
+        box.append(self.setting_row("ONNX CPU threads", "Used by local sherpa models except Pocket. Four is the measured default on the reference laptop.", self.local_threads))
+        self.pocket_threads = Gtk.SpinButton.new_with_range(1, 16, 1)
+        box.append(self.setting_row("Pocket CPU threads", "Pocket scales differently from Kokoro. Two is the measured default on the reference laptop.", self.pocket_threads))
         self.silence_scale = Gtk.SpinButton.new_with_range(0, 2, .05); self.silence_scale.set_digits(2)
         box.append(self.setting_row("Generated pause scale", "Scales pauses created inside a local-model utterance. It cannot remove pauses inserted by the reading application.", self.silence_scale))
         self.pocket_steps = Gtk.SpinButton.new_with_range(1, 8, 1)
@@ -407,6 +409,8 @@ class SettingsPage(Gtk.Box):
         box.append(self.setting_row("MOSS pipeline threads", "Threads per ONNX stage. Two is fastest on the reference four-core laptop; generation and decoding already run in parallel.", self.moss_threads))
         self.moss_batch = Gtk.SpinButton.new_with_range(1, 16, 1)
         box.append(self.setting_row("MOSS decode batch", "Smaller batches start sooner; larger batches may slightly improve throughput. Recommended: 4.", self.moss_batch))
+        self.external_idle = Gtk.SpinButton.new_with_range(0, 3600, 30)
+        box.append(self.setting_row("Heavy runtime idle timeout", "Seconds before idle Qwen or MOSS processes release RAM. Zero keeps them loaded until the broker exits.", self.external_idle))
         self.model_cache = Gtk.SpinButton.new_with_range(1, 8, 1)
         box.append(self.setting_row("Warm local models", "More reduces model-switch delay but increases RAM use.", self.model_cache))
         self.audio_cache = Gtk.SpinButton.new_with_range(0, 1024, 16)
@@ -459,12 +463,14 @@ class SettingsPage(Gtk.Box):
         self.auto_language.set_active(bool(playback.get("autoDetectLanguage", {}).get("value", True)))
         self.preload_voice.set_active(bool(playback.get("preloadDefaultVoice", {}).get("value", False)))
         self.local_threads.set_value(playback.get("localThreads", {}).get("value", 4))
+        self.pocket_threads.set_value(playback.get("pocketThreads", {}).get("value", 2))
         self.silence_scale.set_value(playback.get("localSilenceScale", {}).get("value", .2))
         self.pocket_steps.set_value(playback.get("pocketNumSteps", {}).get("value", 3))
         self.pocket_chunk.set_value(playback.get("pocketChunkSize", {}).get("value", 4))
         self.zipvoice_steps.set_value(playback.get("zipvoiceNumSteps", {}).get("value", 4))
         self.moss_threads.set_value(playback.get("mossThreads", {}).get("value", 2))
         self.moss_batch.set_value(playback.get("mossBatchFrames", {}).get("value", 4))
+        self.external_idle.set_value(playback.get("externalIdleSeconds", {}).get("value", 120))
         self.model_cache.set_value(playback.get("maxLoadedModels", {}).get("value", 2))
         self.audio_cache.set_value(playback.get("audioCacheMb", {}).get("value", 64))
         self.language_characters.set_value(playback.get("languageMinimumCharacters", {}).get("value", 40))
@@ -490,12 +496,14 @@ class SettingsPage(Gtk.Box):
     def apply_advanced(self, *_args):
         def work():
             values = (("local-threads", self.local_threads.get_value_as_int()),
+                      ("pocket-threads", self.pocket_threads.get_value_as_int()),
                       ("local-silence-scale", self.silence_scale.get_value()),
                       ("pocket-num-steps", self.pocket_steps.get_value_as_int()),
                       ("pocket-chunk-size", self.pocket_chunk.get_value_as_int()),
                       ("zipvoice-num-steps", self.zipvoice_steps.get_value_as_int()),
                       ("moss-threads", self.moss_threads.get_value_as_int()),
                       ("moss-batch-frames", self.moss_batch.get_value_as_int()),
+                      ("external-idle-seconds", self.external_idle.get_value_as_int()),
                       ("max-loaded-models", self.model_cache.get_value_as_int()),
                       ("audio-cache-mb", self.audio_cache.get_value_as_int()),
                       ("language-minimum-characters", self.language_characters.get_value_as_int()),

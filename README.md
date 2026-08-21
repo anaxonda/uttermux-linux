@@ -213,12 +213,14 @@ Advanced performance controls are available in both Settings and the CLI:
 | Setting | Recommended | Effect |
 | --- | ---: | --- |
 | `local-threads` | 4 | ONNX threads per local sherpa model; excessive threads can be slower |
+| `pocket-threads` | 2 | Pocket-specific ONNX threads; measured separately from Kokoro |
 | `local-silence-scale` | 0.2 | Scales pauses generated inside one local utterance |
 | `pocket-num-steps` | 3 | Pocket quality/latency tradeoff |
 | `pocket-chunk-size` | 4 | Pocket continuity/responsiveness tradeoff |
 | `zipvoice-num-steps` | 4 | ZipVoice quality/latency tradeoff |
 | `moss-threads` | 2 | Threads for each concurrent MOSS ONNX stage |
 | `moss-batch-frames` | 4 | MOSS first-audio latency versus decode throughput |
+| `external-idle-seconds` | 120 | Releases Qwen/MOSS process memory after inactivity; zero keeps it resident |
 | `max-loaded-models` | 2 | Warm-model count versus RAM use |
 
 For example, `uttermux setting local-threads 2` applies the new value and
@@ -392,6 +394,7 @@ Architecture and benchmark notes:
 - [Catalog schema v2](docs/interop/catalog-v2.schema.json)
 - [Generated complete model index](docs/MODELS.generated.md)
 - [MOSS-TTS-Nano experiments](docs/moss-benchmarks.md)
+- [Pocket TTS runtime experiments](docs/pocket-benchmarks.md)
 - [Qwen3-TTS experiments](docs/qwen-benchmarks.md)
 - [Saved benchmark format](docs/benchmark-format.md)
 - [Gated runtime candidates](docs/runtime-candidates.md)
