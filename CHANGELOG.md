@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Replaced the incomplete model table with generated catalog documentation and
+  added an accurate cross-platform online-provider matrix.
+- Added a beta-aware one-line Arch installer with release checksum validation.
+- Added direct active-voice selection to Test & tune.
+
 ## 0.4.0-beta.2 - 2026-08-21
 
 - Added adaptive hardware tuning, per-model controls, benchmark reports, and heavy-model guidance.

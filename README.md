@@ -4,6 +4,8 @@
 
 [![Linux CI](https://github.com/anaxonda/uttermux-linux/actions/workflows/linux.yml/badge.svg)](https://github.com/anaxonda/uttermux-linux/actions/workflows/linux.yml)
 
+Android system TTS engine: [`anaxonda/uttermux-android`](https://github.com/anaxonda/uttermux-android)
+
 Use local and online text-to-speech voices everywhere on Linux.
 
 UtterMux makes one voice catalog available to Firefox Reader View, Zotero Read
@@ -36,10 +38,12 @@ Firefox · Zotero · spd-say · KOReader · selection shortcut
    Piper/Kokoro/etc.        Edge        ElevenLabs/xAI
 ```
 
-The GTK application has the same three top-level areas as the Android app:
+The GTK application has the same four top-level areas as the Android app:
 
 - **Voices** — search, filter, download, preview, and choose a default voice.
 - **Create voice** — create and manage Pocket, ZipVoice, or ElevenLabs clones.
+- **Test & tune** — benchmark exact installed artifacts, adjust per-model
+  settings, and select the tested voice.
 - **Settings** — configure providers, routing, model caching, and diagnostics.
 
 The GTK application and CLI operate on the same catalog and configuration.
@@ -79,7 +83,7 @@ means a reference recording must be configured before a system voice exists.
 
 | Family | Linux | Android | Current boundary |
 | --- | --- | --- | --- |
-| Piper/VITS | Yes; Lessac medium in the built-in catalog | Yes; dynamic upstream catalog | Fixed voices |
+| Piper/VITS | Yes; generated pinned catalog | Yes; generated pinned catalog | Fixed voices |
 | Inflect Nano/Micro | Nano | Nano and Micro | Fixed English voices |
 | Kitten | FP16 v0.1 and INT8 v0.8 | FP16 v0.1 and INT8 v0.8 | Fixed English voices |
 | Matcha | Yes | Yes | LJSpeech + Vocos artifact |
@@ -90,19 +94,12 @@ means a reference recording must be configured before a system voice exists.
 | MOSS-TTS-Nano | Companion adapter; FP32 | No | Android evaluation failed sustained-reader acceptance |
 | Qwen3-TTS 0.6B | Companion adapter; CustomVoice | Base Q4_K_M device preview; cloning profiles | Separate persistent Linux and GGUF Android runtimes |
 
-| Catalog artifact | Engine | Languages / voices exposed | Clone | Download | Est. RAM | Precision | Integration | Upstream |
-| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |
-| `vits-inflect-en-nano-v2` | VITS | English; 1 | No | 21 MiB | 100 MiB | FP32 | sherpa-onnx C API | [Inflect Nano v2](https://huggingface.co/owensong/Inflect-Nano-v2) |
-| `kitten-nano-en-v0_1-fp16` | Kitten | English; 1 | No | 26 MiB | 180 MiB | FP16 | sherpa-onnx C API | [KittenTTS](https://github.com/KittenML/KittenTTS) |
-| `kitten-nano-en-v0_8-int8` | Kitten | English; 8 | No | 30 MiB | 180 MiB | INT8 | sherpa-onnx C API | [KittenTTS](https://github.com/KittenML/KittenTTS) |
-| `vits-piper-en_US-lessac-medium` | Piper/VITS | English; 1 | No | 64 MiB | 180 MiB | FP32 | sherpa-onnx C API | [Piper](https://github.com/OHF-Voice/piper1-gpl) |
-| `matcha-icefall-en_US-ljspeech` | Matcha + Vocos | English; 1 | No | 77 MiB | 320 MiB | FP32 | sherpa-onnx C API | [Matcha-TTS](https://github.com/shivammehta25/Matcha-TTS) |
-| `sherpa-onnx-supertonic-3-tts-int8-2026-05-11` | Supertonic 3 | `en-US` catalog metadata; 10 styles; multilingual model | No | 129 MiB | 420 MiB | INT8 | sherpa-onnx C API | [Supertonic](https://github.com/supertone-inc/supertonic) |
-| `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` | ZipVoice Distill | English/Chinese; user profiles | Yes | 156 MiB | 650 MiB | INT8 | sherpa-onnx C API | [ZipVoice](https://github.com/k2-fsa/ZipVoice) |
-| `sherpa-onnx-pocket-tts-int8-2026-01-26` | Pocket | English; 4 presets + profiles | Yes | 176 MiB | 420 MiB | INT8 | sherpa-onnx C API | [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) |
-| `kokoro-multi-lang-v1_0` | Kokoro 82M | English metadata; 6 catalog voices; artifact contains 53 speakers | No | 333 MiB | 560 MiB | FP32 | sherpa-onnx C API | [Kokoro in sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/kokoro.html) |
-| `moss-tts-nano-100m-onnx` | MOSS Nano | 20 languages; preset references | No | 728 MiB | 1.4 GiB | FP32 | external persistent ONNX adapter | [MOSS-TTS-Nano](https://github.com/OpenMOSS/MOSS-TTS-Nano) |
-| `qwen3-tts-0.6b-customvoice` | Qwen3-TTS | 10 languages; 9 built-in voices | No | ~2.4 GiB | 3 GiB | runtime INT8 | external persistent C++ adapter | [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) |
+The hand-maintained artifact table previously in this README was incomplete.
+The [generated complete model index](docs/MODELS.generated.md) is now the
+authoritative table of every variant, platform, runtime, language, voice count,
+download size, RAM estimate, precision, status, and license. See
+[catalog architecture](docs/CATALOG.md) for how it is produced and synchronized
+with Android.
 
 ## Model variants not included in the Linux app
 
@@ -113,17 +110,30 @@ hardware or through another ONNX Runtime execution provider. A new artifact is
 added only after its model files, execution provider, runtime configuration,
 checksum, license, and synthesis path are verified together.
 
-## Online providers
+## Online provider support
 
-| Provider | Authentication | Catalog status |
-| --- | --- | --- |
-| Microsoft Edge Read Aloud | none | implemented; live locale discovery |
-| ElevenLabs | API key | implemented; account voice discovery and cloning |
-| xAI / Grok | API key | implemented; provider voices and automatic language mode |
+Cloud voice lists are discovered at runtime and are intentionally not frozen in
+the generated local-model catalog.
 
-Azure, Google, AWS, OpenAI, Deepgram, Cartesia, PlayHT, and Resemble have
-catalog/provider scaffolding but are not advertised as working until each has
-passed credentialed end-to-end tests.
+| Provider | Authentication | Linux | Android |
+| --- | --- | --- | --- |
+| Microsoft Edge Read Aloud | none | Implemented | Implemented |
+| ElevenLabs | API key | Implemented; account voices and cloning | Implemented; account voices |
+| xAI / Grok | API key | Implemented | Implemented |
+| OpenAI-compatible | API key, endpoint, model | Not implemented | Implemented |
+| Azure Speech | resource key and region/endpoint | Not implemented | Implemented |
+| Qwen / DashScope | API key, region, workspace | Local Qwen only | Implemented |
+| Google Cloud TTS | restricted API key or proxy | Not implemented | Implemented |
+| Amazon Polly | SigV4, Cognito, or proxy | Not implemented | Implemented |
+| Deepgram | API key | Not implemented | Implemented |
+| Cartesia | API key | Not implemented | Implemented |
+| PlayHT | provider credentials | Not implemented | Implemented |
+| Resemble | provider credentials | Not implemented | Implemented |
+| Custom PCM endpoint | HTTPS endpoint and bearer token | Not implemented | Implemented |
+
+“Implemented” means a provider adapter and voice path are present. Paid and
+account-specific services still require credentials and may not be covered by
+the project's public CI. They are never enabled as implicit fallbacks.
 
 MOSS-TTS-Nano uses a persistent, cancellable two-stage adapter. Generation and
 codec decoding run concurrently through bounded queues; unlike the upstream
@@ -139,6 +149,21 @@ made. Faster systems require their own benchmark before continuous-reading use.
 See [Qwen benchmark notes](docs/qwen-benchmarks.md).
 
 ## Install on Arch Linux
+
+Install the latest GitHub release with its checksum-resolved Arch package:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://github.com/anaxonda/uttermux-linux/raw/main/install.sh | bash
+```
+
+The script downloads the release `PKGBUILD`, rejects unresolved checksums,
+builds the pinned sherpa-onnx dependency, installs through `makepkg`, runs
+`uttermux setup`, and finishes with `uttermux doctor`. Review
+[`install.sh`](install.sh) before piping it to a shell. It currently supports
+Arch Linux; the source procedure below remains the portable installation path.
+
+### Build from source
 
 Install build and runtime dependencies:
 
@@ -194,7 +219,8 @@ To test an installed local voice in the manager, open **Voices**, press
 model** on that voice—or open **Test & tune**—to compare CPU-thread settings.
 The benchmark shows cold/warm first-audio latency, real-time factor (RTF), and
 peak memory, then asks before applying its proposed setting. It neither
-downloads another model nor evaluates voice quality.
+downloads another model nor evaluates voice quality. **Use as active voice** on
+the same test row selects that exact tested voice.
 
 Useful CLI commands:
 
@@ -357,7 +383,7 @@ uttermux detect 'Ceci est un paragraphe français suffisamment long.'
 uttermux routes
 ```
 
-## Online providers
+## Configuring online providers
 
 Providers and credentials can be configured in the GTK Settings page. Keys are
 stored in mode-0600 files rather than the main configuration or process command

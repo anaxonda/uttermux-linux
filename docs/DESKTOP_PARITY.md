@@ -6,6 +6,15 @@ public vocabulary for providers, model variants, voices, profiles, and runtime
 state. Stable voice IDs use `provider/model/speaker@language`; installation and
 activity are runtime state and must not be encoded into static catalog records.
 
+The reviewed catalog sources and generator live in the
+[Linux repository](https://github.com/anaxonda/uttermux-linux). Linux consumes
+the reviewed TOML directly and also installs the generated schema-2 projection.
+Android commits an identical generated JSON file so its Gradle build remains
+offline and reproducible. Updating the Android copy is a reviewed repository
+change; Android never downloads a mutable catalog during its build. Cloud voice
+lists are discovered by provider adapters at runtime and are not part of this
+static contract.
+
 The desktop migration will preserve the existing Speech Dispatcher boundary.
 The broker and CLI, rather than the GTK process, will own configuration and
 synthesis. The required JSON commands are:

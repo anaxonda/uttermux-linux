@@ -617,6 +617,8 @@ class TunePage(Gtk.Box):
             controls.append(state)
             preview_spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER); controls.append(preview_spinner)
             preview = Gtk.Button(label="Preview"); preview.connect("clicked", self.preview, voice, preview_spinner); controls.append(preview)
+            use = Gtk.Button(label="Use as active voice")
+            use.connect("clicked", self.activate_voice, voice); controls.append(use)
             run = Gtk.Button(label="Benchmark" if provider == "local" else "Benchmark current settings")
             run.connect("clicked", self.benchmark if provider == "local" else self.confirm_companion_benchmark, model, voice); controls.append(run)
             settings = Gtk.Button(label="Model settings…")
@@ -641,6 +643,10 @@ class TunePage(Gtk.Box):
                                   result.stderr.strip() or "Preview failed"))
             return GLib.SOURCE_REMOVE
         threading.Thread(target=work, daemon=True).start()
+
+    def activate_voice(self, _button, voice):
+        self.window.run_task(command("default", voice["id"]),
+                             f"Active voice: {voice['name']}", self.load)
 
     def benchmark(self, button, model, voice):
         if self.running: return

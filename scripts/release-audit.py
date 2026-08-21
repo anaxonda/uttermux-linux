@@ -48,6 +48,9 @@ def main() -> int:
     for script in (ROOT / "scripts").iterdir():
         if script.suffix in {"", ".py"} and script.is_file() and not script.stat().st_mode & 0o111:
             errors.append(f"script is not executable: {script.relative_to(ROOT)}")
+    installer = ROOT / "install.sh"
+    if not installer.is_file() or not installer.stat().st_mode & 0o111:
+        errors.append("install.sh is missing or not executable")
     if not (ROOT / "LICENSE").is_file(): errors.append("LICENSE is missing")
     # Tag automation resolves these template values and publishes the resulting
     # PKGBUILD beside the deterministic source archive. Keep ordinary CI useful
