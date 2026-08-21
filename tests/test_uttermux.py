@@ -212,6 +212,30 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(effective["zipvoice_num_steps"], 6)
         result.lock.release()
 
+    def test_artifact_tuning_and_ephemeral_override_take_precedence(self):
+        broker = object.__new__(self.u.Broker)
+        broker.config = {"local_threads": 2, "tuning": {"models": {"kokoro": {"threads": 6}}}}
+        broker.engine_lock = threading.Lock(); broker.engines = OrderedDict()
+        broker.max_loaded_models = 3; broker.api = mock.Mock()
+        fake = mock.MagicMock(); fake.lock = threading.RLock()
+        model = {"id": "kokoro", "engine": "kokoro", "root": "/tmp", "files": {}}
+        with mock.patch.object(self.u, "SherpaEngine", return_value=fake) as constructor:
+            broker.engine(model, 8)
+        self.assertEqual(constructor.call_args.args[1]["num_threads"], 8)
+        self.assertIn("kokoro@threads-8", broker.engines)
+
+    def test_stale_runtime_tuning_is_ignored(self):
+        broker = object.__new__(self.u.Broker)
+        broker.config = {"local_threads": 2, "tuning": {"models": {"kokoro": {
+            "threads": 6, "runtime_revision": self.u.TUNING_RUNTIME_REVISION + 1}}}}
+        broker.engine_lock = threading.Lock(); broker.engines = OrderedDict()
+        broker.max_loaded_models = 2; broker.api = mock.Mock()
+        fake = mock.MagicMock(); fake.lock = threading.RLock()
+        model = {"id": "kokoro", "engine": "kokoro", "root": "/tmp", "files": {}}
+        with mock.patch.object(self.u, "SherpaEngine", return_value=fake) as constructor:
+            broker.engine(model)
+        self.assertEqual(constructor.call_args.args[1]["num_threads"], 2)
+
     def test_rejects_bad_protocol_version(self):
         raw = bytearray(self.u.packet(self.u.HEALTH, 1)); raw[4:6] = (99).to_bytes(2, "little")
         with self.assertRaises(ValueError): self.u.unpack(bytes(raw))

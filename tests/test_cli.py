@@ -102,6 +102,21 @@ class CliTests(unittest.TestCase):
         self.assertIn("moss_batch_frames = 4", rendered)
         self.assertIn("external_idle_seconds = 90", rendered)
 
+    def test_render_preserves_per_artifact_tuning(self):
+        rendered = ut.render_config({"tuning": {"models": {
+            "kokoro-multi-lang-v1_1": {"threads": 6}}}})
+        document = __import__("tomllib").loads(rendered)
+        self.assertEqual(document["tuning"]["models"]["kokoro-multi-lang-v1_1"]["threads"], 6)
+        self.assertEqual(document["tuning"]["models"]["kokoro-multi-lang-v1_1"]["runtime_revision"], 1)
+
+    def test_benchmark_passage_follows_voice_language(self):
+        self.assertIn("démarrage", ut.benchmark_passage("fr-FR"))
+        self.assertIn("startup", ut.benchmark_passage("en-US"))
+
+    def test_model_storage_policy_reserves_extraction_and_host_space(self):
+        self.assertEqual(sv.required_storage_bytes(350 * 1024 ** 2),
+                         1024 ** 3 + 3 * 350 * 1024 ** 2)
+
     def test_short_text_is_not_auto_detected(self):
         language, confidence, reason = ut.detect_text("Bonjour.")
         self.assertEqual((language, confidence, reason), ("", 0, "insufficient-text"))

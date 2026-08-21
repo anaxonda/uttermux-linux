@@ -34,6 +34,7 @@ except ImportError:
 
 MAGIC, VERSION = 0x58544D55, 1
 APP_VERSION = "0.4.0"
+TUNING_RUNTIME_REVISION = 1
 HEADER = struct.Struct("<IHHQI")
 HELLO, LIST_VOICES, VOICE, SPEAK, AUDIO_START, AUDIO, DONE, STOP, ERROR, HEALTH, STATUS, STATE = range(1, 13)
 
@@ -141,6 +142,13 @@ def render_config(doc: dict) -> str:
              f'preload_default_voice = {str(bool(doc.get("preload_default_voice", False))).lower()}']
     for key in ("default_voice", "fallback_voice"):
         if doc.get(key): lines.append(f'{key} = {quote(doc[key])}')
+    for model_id, tuning in sorted(doc.get("tuning", {}).get("models", {}).items()):
+        threads = int(tuning.get("threads", 0))
+        if threads > 0:
+            lines += ["", f'[tuning.models.{quote(model_id)}]', f'threads = {threads}']
+            if tuning.get("artifact_sha256"): lines.append(f'artifact_sha256 = {quote(tuning["artifact_sha256"])}')
+            lines.append(f'protocol_version = {int(tuning.get("protocol_version", VERSION))}')
+            lines.append(f'runtime_revision = {int(tuning.get("runtime_revision", TUNING_RUNTIME_REVISION))}')
     providers = doc.get("providers", {})
     edge = providers.get("edge", {})
     lines += ["", "[providers.edge]", f'enabled = {str(bool(edge.get("enabled", False))).lower()}',
@@ -785,10 +793,10 @@ def cmd_preview(args):
             playback.terminate()
 
 
-def benchmark_once(voice_id: str, text: str, language: str = "") -> dict:
+def benchmark_once(voice_id: str, text: str, language: str = "", threads: int = 0) -> dict:
     """Measure broker synthesis without including audio-device playback."""
-    payload = b"\0".join(value.encode("utf-8") for value in
-                         (voice_id, "1.0", text, language)) + b"\0"
+    values = (voice_id, "1.0", text, language) + ((str(threads),) if threads else ())
+    payload = b"\0".join(value.encode("utf-8") for value in values) + b"\0"
     started_at = time.perf_counter()
     first_audio_at = None
     sample_rate = 0
@@ -860,6 +868,94 @@ def cmd_benchmark(args):
               f"{run['audioSeconds']:>7.3f}  {run['rtf']:>5.3f}")
     print(result["note"])
     if result.get("savedTo"): print(f"Saved {result['savedTo']}")
+
+
+def broker_rss_mb() -> int:
+    try:
+        return int(next(json.loads(payload).get("rssMb", 0)
+                        for kind, payload in transact(STATUS) if kind == STATE))
+    except (OSError, RuntimeError, ValueError, StopIteration, json.JSONDecodeError):
+        pass
+    return 0
+
+
+def benchmark_passage(language: str) -> str:
+    language = (language or "en").split("-", 1)[0].lower()
+    passages = {
+        "fr": "UtterMux mesure le démarrage, la continuité et la vitesse de cette voix. Plusieurs phrases vérifient une lecture soutenue avec une ponctuation naturelle.",
+        "de": "UtterMux misst Startzeit, Kontinuität und Geschwindigkeit dieser Stimme. Mehrere Sätze prüfen anhaltendes Lesen mit natürlicher Zeichensetzung.",
+        "es": "UtterMux mide el inicio, la continuidad y la velocidad de esta voz. Varias frases comprueban una lectura sostenida con puntuación natural.",
+        "it": "UtterMux misura l'avvio, la continuità e la velocità di questa voce. Più frasi verificano una lettura prolungata con punteggiatura naturale.",
+        "pt": "O UtterMux mede o início, a continuidade e a velocidade desta voz. Várias frases verificam uma leitura contínua com pontuação natural.",
+    }
+    return passages.get(language, "UtterMux measures startup latency, continuity, and sustained synthesis speed for this installed voice. Several sentences provide natural punctuation while keeping every candidate directly comparable.")
+
+
+def cmd_tune(args):
+    record = next((record for record in voice_records()
+                   if record["id"] == args.voice or record["name"] == args.voice), None)
+    if not record: raise RuntimeError(f"unknown voice: {args.voice}")
+    if record.get("provider") != "local":
+        raise RuntimeError("device tuning supports installed local sherpa voices only")
+    model_id, language = record["model"], args.language or record.get("native_language", "")
+    cores = max(1, int(hardware_profile()["logicalCores"]))
+    candidates = args.threads or [value for value in (1, 2, 3, 4, 6, 8, 12, 16) if value <= cores]
+    candidates = sorted(set(value for value in candidates if 1 <= value <= min(cores, 16)))
+    if not candidates: raise RuntimeError("no valid thread candidates")
+    groups, best_seen = [], None
+    for threads in candidates:
+        runs = []
+        for index in range(3):
+            run = benchmark_once(record["id"], args.text or benchmark_passage(language), language, threads)
+            run["cold"] = index == 0; run["rssMb"] = broker_rss_mb(); runs.append(run)
+            if index == 1 and best_seen is not None and statistics.median(x["rtf"] for x in runs) > best_seen * 1.25:
+                break
+        median_rtf = statistics.median(run["rtf"] for run in runs)
+        summary = {"threads": threads, "medianRtf": round(median_rtf, 3),
+                   "medianFirstAudioMs": round(statistics.median(run["firstAudioMs"] for run in runs), 1),
+                   "peakRssMb": max(run["rssMb"] for run in runs), "runs": runs}
+        groups.append(summary); best_seen = median_rtf if best_seen is None else min(best_seen, median_rtf)
+    fastest = min(group["medianRtf"] for group in groups)
+    winner = min((group for group in groups if group["medianRtf"] <= fastest * 1.05),
+                 key=lambda group: group["threads"])
+    classification = "reader-ready" if winner["medianRtf"] <= .85 else "marginal" if winner["medianRtf"] <= 1 else "too-slow"
+    catalog = next((item for item in local_catalog() if item["id"] == model_id), {})
+    result = {"schemaVersion": 3, "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "application": {"name": "UtterMux", "version": APP_VERSION},
+              "artifact": {"id": model_id, "sha256": catalog.get("sha256", ""),
+                           "family": catalog.get("family", ""), "quantization": catalog.get("quantization", "")},
+              "voice": record["id"], "language": language, "machine": hardware_profile(),
+              "candidates": groups, "winner": {key: value for key, value in winner.items() if key != "runs"},
+              "classification": classification,
+              "note": "Performance metrics do not measure speech quality; listen before changing variants."}
+    output = (Path(args.output).expanduser() if args.output else data_root() / "benchmarks" /
+              f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{model_id}.json")
+    atomic_write(output, json.dumps(result, ensure_ascii=False, indent=2) + "\n", 0o600)
+    result["savedTo"] = str(output)
+    if args.json: print(json.dumps(result, indent=2))
+    else:
+        print(f"{record['name']} · {model_id}")
+        print("threads  first_audio_ms  rtf  peak_rss_mb")
+        for group in groups: print(f"{group['threads']:>7}  {group['medianFirstAudioMs']:>14.1f}  {group['medianRtf']:>5.3f}  {group['peakRssMb']:>11}")
+        print(f"Winner: {winner['threads']} threads · {winner['medianRtf']:.3f} RTF · {classification}")
+        print(f"Review, then apply with: uttermux tuning apply {quote(model_id)} {winner['threads']}")
+        print(f"Saved {output}")
+
+
+def cmd_tuning(args):
+    doc = read_config(); models = doc.setdefault("tuning", {}).setdefault("models", {})
+    if args.action == "list":
+        print(json.dumps(models, indent=2)); return
+    if not args.model: raise RuntimeError(f"tuning {args.action} requires a model ID")
+    if args.action == "reset": models.pop(args.model, None)
+    else:
+        if args.threads is None: raise RuntimeError("tuning apply requires a thread count")
+        catalog = next((item for item in local_catalog() if item["id"] == args.model), {})
+        models[args.model] = {"threads": max(1, min(16, args.threads)),
+                              "artifact_sha256": catalog.get("sha256", ""),
+                              "protocol_version": VERSION,
+                              "runtime_revision": TUNING_RUNTIME_REVISION}
+    atomic_write(config_path(), render_config(doc)); restart()
 
 
 def GLib_find_program(name: str) -> str | None:
@@ -1045,6 +1141,12 @@ def main():
     p.add_argument("--language"); p.add_argument("--runs", type=int, default=3, choices=range(1, 11))
     p.add_argument("--json", action="store_true"); p.add_argument("--save", action="store_true")
     p.add_argument("--output"); p.set_defaults(func=cmd_benchmark)
+    p = sub.add_parser("tune"); p.add_argument("voice")
+    p.add_argument("text", nargs="?", default=None)
+    p.add_argument("--language"); p.add_argument("--threads", nargs="+", type=int)
+    p.add_argument("--json", action="store_true"); p.add_argument("--output"); p.set_defaults(func=cmd_tune)
+    p = sub.add_parser("tuning"); p.add_argument("action", choices=("list", "apply", "reset"))
+    p.add_argument("model", nargs="?"); p.add_argument("threads", nargs="?", type=int); p.set_defaults(func=cmd_tuning)
     p = sub.add_parser("preview-url"); p.add_argument("url"); p.set_defaults(func=cmd_preview_url)
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
     p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.set_defaults(func=cmd_provider)

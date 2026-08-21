@@ -13,3 +13,10 @@ long session slower.
 
 Benchmark records intentionally omit synthesized text, credentials, profile
 paths, reference audio, host names, and machine identifiers.
+
+`uttermux tune VOICE` writes schema 3 records. These add an immutable artifact
+ID and checksum, quantization, candidate thread settings, cold/warm run labels,
+broker RSS, the selected candidate, and a reader-readiness classification. A
+tuned profile is not reused after the recorded artifact checksum, broker
+protocol, or tuning-runtime revision changes. Schema 2 remains the format of the single-setting
+`benchmark` command for compatibility.

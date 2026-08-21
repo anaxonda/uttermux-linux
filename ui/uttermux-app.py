@@ -559,6 +559,79 @@ class SettingsPage(Gtk.Box):
         dialog.connect("response", response); dialog.present()
 
 
+class TunePage(Gtk.Box):
+    def __init__(self, window):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                         margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
+        self.window, self.running = window, False
+        heading = Gtk.Label(label="Tune this device", xalign=0); heading.add_css_class("title-2"); self.append(heading)
+        self.append(Gtk.Label(label="Benchmarks each installed artifact independently. Results measure performance, not speech quality.", xalign=0, wrap=True))
+        self.status = Gtk.Label(label="Loading installed models…", xalign=0, wrap=True); self.append(self.status)
+        self.rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE); self.rows.add_css_class("boxed-list"); self.append(self.rows)
+        refresh = Gtk.Button(label="Refresh"); refresh.connect("clicked", lambda *_: self.load()); self.append(refresh)
+        self.load()
+
+    def load(self):
+        def work():
+            try: result = (run_json("catalog"), run_json("tuning", "list"))
+            except Exception as error: GLib.idle_add(self.loaded, None, {}, str(error)); return
+            GLib.idle_add(self.loaded, result[0], result[1], "")
+        threading.Thread(target=work, daemon=True).start()
+
+    def loaded(self, catalog, tuning, error):
+        while child := self.rows.get_first_child(): self.rows.remove(child)
+        if error: self.status.set_text(error); return GLib.SOURCE_REMOVE
+        models = {item["id"]: item for item in catalog.get("models", [])}
+        seen, entries = set(), []
+        for voice in catalog.get("voices", []):
+            model = models.get(voice.get("modelId"), {})
+            if not voice.get("ready") or model.get("providerId") != "local" or model.get("id") in seen: continue
+            seen.add(model["id"]); entries.append((model, voice))
+        self.status.set_text(f"{len(entries)} installed local artifact{'s' if len(entries) != 1 else ''}")
+        for model, voice in sorted(entries, key=lambda item: (item[0].get("family", ""), item[0].get("name", ""))):
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5, margin_top=8, margin_bottom=8, margin_start=10, margin_end=10)
+            row.append(Gtk.Label(label=model.get("name", model["id"]), xalign=0, wrap=True))
+            facts = " · ".join(filter(None, (model.get("family"), model.get("quantization"), model.get("version"))))
+            row.append(Gtk.Label(label=facts, xalign=0, wrap=True))
+            controls = Gtk.Box(spacing=8); applied = int(tuning.get(model["id"], {}).get("threads", 0))
+            state = Gtk.Label(label=f"{applied} threads · Tuned" if applied else "Automatic/global tuning", xalign=0, hexpand=True)
+            controls.append(state)
+            preview = Gtk.Button(label="Preview"); preview.connect("clicked", lambda _button, voice_id=voice["id"]: subprocess.Popen(command("preview", voice_id))); controls.append(preview)
+            run = Gtk.Button(label="Benchmark"); run.connect("clicked", self.benchmark, model, voice); controls.append(run)
+            reset = Gtk.Button(label="Reset", sensitive=applied > 0); reset.connect("clicked", self.reset, model["id"]); controls.append(reset)
+            row.append(controls); self.rows.append(row)
+        return GLib.SOURCE_REMOVE
+
+    def benchmark(self, button, model, voice):
+        if self.running: return
+        self.running = True; button.set_sensitive(False); self.status.set_text(f"Benchmarking {model['id']}…")
+        def work():
+            result = subprocess.run(command("tune", voice["id"], "--json"), text=True, capture_output=True)
+            GLib.idle_add(done, result)
+        def done(result):
+            self.running = False; button.set_sensitive(True)
+            if result.returncode:
+                self.status.set_text(result.stderr.strip() or "Benchmark failed"); return GLib.SOURCE_REMOVE
+            report = json.loads(result.stdout); winner = report["winner"]
+            dialog = Gtk.AlertDialog(message="Apply tuned profile?", detail=(
+                f"{model.get('name', model['id'])}: {winner['threads']} threads, "
+                f"RTF {winner['medianRtf']:.3f}, {report['classification']}.\n\n"
+                "This measures performance, not voice quality, and does not change the model variant."),
+                buttons=["Keep current", "Apply"], cancel_button=0, default_button=1)
+            def chosen(_dialog, task):
+                try: choice = _dialog.choose_finish(task)
+                except GLib.Error: choice = 0
+                if choice == 1:
+                    self.window.run_task(command("tuning", "apply", model["id"], str(winner["threads"])),
+                                         "Tuned profile applied", self.load)
+                else: self.load()
+            dialog.choose(self.window, None, chosen); return GLib.SOURCE_REMOVE
+        threading.Thread(target=work, daemon=True).start()
+
+    def reset(self, _button, model_id):
+        self.window.run_task(command("tuning", "reset", model_id), "Tuned profile removed", self.load)
+
+
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="UtterMux", default_width=920, default_height=720)
@@ -566,6 +639,7 @@ class Window(Gtk.ApplicationWindow):
         switcher = Gtk.StackSwitcher(stack=stack); header.set_title_widget(switcher); self.set_titlebar(header)
         self.voices = VoicePage(self); stack.add_titled(self.voices, "voices", "Voices")
         stack.add_titled(self.scrolled(CreatePage(self)), "create", "Create voice")
+        stack.add_titled(self.scrolled(TunePage(self)), "tune", "Tune")
         stack.add_titled(self.scrolled(SettingsPage(self)), "settings", "Settings"); self.set_child(stack)
 
     @staticmethod

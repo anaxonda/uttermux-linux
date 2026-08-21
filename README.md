@@ -193,6 +193,7 @@ uttermux model install vits-inflect-en-nano-v2
 uttermux model install moss-tts-nano-100m-onnx
 uttermux preview sherpa/vits-inflect-en-nano-v2/default
 uttermux benchmark sherpa/vits-inflect-en-nano-v2/default --runs 3
+uttermux tune sherpa/vits-inflect-en-nano-v2/default
 uttermux default sherpa/vits-inflect-en-nano-v2/default
 uttermux speak-selection
 uttermux speak-selection --clipboard
@@ -268,6 +269,22 @@ when that model was not already warm; later runs measure the warm path. The
 command does not control CPU frequency, temperature, or background load.
 Published results should state the machine, text, thread settings, and whether
 the broker was restarted.
+
+The **Tune** page and `uttermux tune VOICE` compare thread counts for one exact
+installed artifact. Benchmark requests carry an ephemeral override and never
+rewrite the active configuration. The smallest thread count within 5% of the
+fastest measured RTF is proposed; apply it only after review:
+
+```sh
+uttermux tuning apply vits-inflect-en-nano-v2 2
+uttermux tuning reset vits-inflect-en-nano-v2
+```
+
+Profiles are artifact-specific and record the catalog checksum, broker
+protocol, and tuning-runtime revision. FP32, FP16, INT8, and GGUF variants therefore retain independent
+measurements. Performance results cannot determine pronunciation, missing
+phonemes, artifacts, or preferred voice quality; use the adjacent Preview
+buttons to compare variants before changing the default voice.
 
 Use [`docs/custom-models.md`](docs/custom-models.md) for a complete schema-1
 Piper/VITS manifest and verification commands. The production C++ parser tests

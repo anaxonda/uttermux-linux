@@ -40,6 +40,7 @@ except ImportError:
 
 MAGIC = 0x58544D55
 VERSION = 1
+TUNING_RUNTIME_REVISION = 1
 HEADER = struct.Struct("<IHHQI")
 MAX_PACKET = 64 * 1024
 HELLO, LIST_VOICES, VOICE, SYNTHESIZE, AUDIO_START, AUDIO, DONE, CANCEL, ERROR, HEALTH, STATUS, STATE = range(1, 13)
@@ -902,8 +903,8 @@ class Broker:
                 models[model["id"]] = model
         return models
 
-    def engine(self, model: dict) -> SherpaEngine:
-        model_id = model["id"]
+    def engine(self, model: dict, thread_override: int = 0) -> SherpaEngine:
+        model_id = model["id"] + (f"@threads-{thread_override}" if thread_override else "")
         with self.engine_lock:
             if model_id in self.engines:
                 self.engines.move_to_end(model_id)
@@ -912,8 +913,14 @@ class Broker:
                 return engine
             effective_model = dict(model)
             setting = "pocket_threads" if model.get("engine") == "pocket" else "local_threads"
+            tuning = self.config.get("tuning", {}).get("models", {}).get(model["id"], {})
+            fingerprint_matches = (not tuning.get("artifact_sha256") or not model.get("artifact_sha256") or
+                                   tuning["artifact_sha256"] == model["artifact_sha256"])
+            protocol_matches = int(tuning.get("protocol_version", VERSION)) == VERSION
+            runtime_matches = int(tuning.get("runtime_revision", TUNING_RUNTIME_REVISION)) == TUNING_RUNTIME_REVISION
+            tuned = int(tuning.get("threads", 0)) if fingerprint_matches and protocol_matches and runtime_matches else 0
             configured_threads = int(self.config.get(setting, 0))
-            effective_model["num_threads"] = configured_threads or automatic_threads(model.get("engine", ""))
+            effective_model["num_threads"] = thread_override or tuned or configured_threads or automatic_threads(model.get("engine", ""))
             effective_model["silence_scale"] = float(self.config.get("local_silence_scale", .2))
             effective_model["pocket_num_steps"] = int(self.config.get("pocket_num_steps", 3))
             effective_model["pocket_chunk_size"] = int(self.config.get("pocket_chunk_size", 4))
@@ -941,8 +948,9 @@ class Broker:
         except Exception as error:
             print(f"uttermuxd: could not preload {model['id']}: {error}", file=sys.stderr)
 
-    def synthesize_local(self, model, voice, text, speed, emit, cancelled, profile=None):
-        engine = self.engine(model)
+    def synthesize_local(self, model, voice, text, speed, emit, cancelled, profile=None,
+                         thread_override: int = 0):
+        engine = self.engine(model, thread_override)
         try:
             maximum = int(model.get("max_chunk_characters",
                                     360 if model.get("engine") == "kokoro" else 0))
@@ -1035,11 +1043,11 @@ class Broker:
         return language, candidates
 
     def _synthesize_voice(self, voice_id: str, text: str, speed: float,
-                          language: str, emit, cancelled):
+                          language: str, emit, cancelled, thread_override: int = 0):
         if voice_id in self.voices:
             model, voice = self.voices[voice_id]
             self.synthesize_local(model, voice, text, speed, emit, cancelled,
-                                  self.profiles.get(voice_id))
+                                  self.profiles.get(voice_id), thread_override)
             return
         if voice_id not in self.online_voices:
             raise ValueError(f"unknown voice: {voice_id}")
@@ -1081,11 +1089,15 @@ class Broker:
             raise
 
     def synthesize(self, voice_id: str, text: str, speed: float, emit, cancelled,
-                   requested_language: str = ""):
+                   requested_language: str = "", thread_override: int = 0):
         text = normalize_synthesis_text(text)
         if not text:
             return
         language, candidates = self._route(voice_id, requested_language, text)
+        if thread_override:
+            if voice_id not in self.voices:
+                raise RuntimeError("thread override requires an exact local sherpa voice")
+            candidates = [voice_id]
         if not candidates:
             raise RuntimeError(f"no route for language {language}")
         with self.runtime_lock:
@@ -1109,7 +1121,11 @@ class Broker:
                     emit(raw)
 
                 try:
-                    self._synthesize_voice(candidate, text, speed, language, tracked, cancelled)
+                    if thread_override:
+                        self._synthesize_voice(candidate, text, speed, language, tracked, cancelled,
+                                               thread_override)
+                    else:
+                        self._synthesize_voice(candidate, text, speed, language, tracked, cancelled)
                     return
                 except Exception as error:
                     last_error = error
@@ -1122,7 +1138,14 @@ class Broker:
                 self.runtime["activeVoice"] = ""
 
     def status(self) -> dict:
-        with self.runtime_lock: return dict(self.runtime)
+        with self.runtime_lock: result = dict(self.runtime)
+        try:
+            result["rssMb"] = next(int(line.split()[1]) // 1024 for line in
+                Path("/proc/self/status").read_text().splitlines() if line.startswith("VmRSS:"))
+        except (OSError, StopIteration, ValueError, IndexError):
+            result["rssMb"] = 0
+        result["pid"] = os.getpid()
+        return result
 
 
 def client_loop(connection: socket.socket, broker: Broker) -> None:
@@ -1156,18 +1179,22 @@ def client_loop(connection: socket.socket, broker: Broker) -> None:
                     jobs[request_id].set()
             elif kind == SYNTHESIZE:
                 values = split_fields(payload)
-                if len(values) not in (3, 4):
+                if len(values) not in (3, 4, 5):
                     send(packet(ERROR, request_id, b"invalid synthesis request"))
                     continue
                 voice_id, speed_text, text = values[:3]
                 language = values[3] if len(values) == 4 else ""
+                if len(values) >= 4: language = values[3]
+                thread_override = int(values[4]) if len(values) == 5 else 0
+                if thread_override < 0 or thread_override > 128:
+                    send(packet(ERROR, request_id, b"invalid thread override")); continue
                 cancelled = jobs[request_id] = threading.Event()
 
                 def run(rid=request_id, voice=voice_id, content=text, speed=float(speed_text),
-                        event=cancelled, requested_language=language):
+                        event=cancelled, requested_language=language, threads=thread_override):
                     try:
                         broker.synthesize(voice, content, speed, lambda raw: send(raw, rid), event,
-                                          requested_language)
+                                          requested_language, threads)
                         send(packet(DONE, rid))
                     except Exception as error:
                         send(packet(ERROR, rid, str(error).encode("utf-8", "replace")))

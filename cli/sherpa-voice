@@ -71,9 +71,9 @@ def manifest_dir() -> Path:
 
 def render_manifest(item: dict, root: Path) -> str:
     lines = ["schema_version = 1", f"id = {q(item['id'])}", f"engine = {q(item['engine'])}",
-             f"root = {q(root)}", "provider = \"cpu\"", "", "[files]"]
+             f"artifact_sha256 = {q(item.get('sha256', ''))}", f"root = {q(root)}", "provider = \"cpu\"", "", "[files]"]
     if item.get("max_chunk_characters"):
-        lines.insert(5, f"max_chunk_characters = {int(item['max_chunk_characters'])}")
+        lines.insert(6, f"max_chunk_characters = {int(item['max_chunk_characters'])}")
     for key, value in item["files"].items():
         lines.append(f"{key} = {q(value)}")
     for voice in item.get("voices", []):
@@ -108,6 +108,11 @@ def sha256(path: Path) -> str:
         for block in iter(lambda: f.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def required_storage_bytes(download_bytes: int) -> int:
+    """Reserve archive, extraction/work space, and 1 GiB for the host system."""
+    return 1024 ** 3 + max(1, int(download_bytes)) * 3
 
 
 def safe_extract(archive: Path, destination: Path) -> None:
@@ -146,6 +151,10 @@ def install_model(model_id: str, no_restart: bool = False) -> None:
     expected = item.get("sha256", "")
     if not re.fullmatch(r"[0-9a-f]{64}", expected):
         raise RuntimeError(f"catalog entry {model_id} has no verified SHA-256")
+    storage_root = model_root(model_id).parent; storage_root.mkdir(parents=True, exist_ok=True)
+    required = required_storage_bytes(item.get("size", 0)); available = shutil.disk_usage(storage_root).free
+    if available < required:
+        raise RuntimeError(f"not enough storage for {model_id}: {available // 1024**2} MB free, {required // 1024**2} MB safe headroom required")
     final = model_root(model_id)
     if final.exists():
         for relative in item["files"].values():
