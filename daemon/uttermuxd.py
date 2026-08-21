@@ -83,6 +83,27 @@ def normalize_synthesis_text(text: str) -> str:
     return " ".join(cleaned.split())
 
 
+NEGATIVE_CONTRACTIONS = re.compile(
+    r"\b(?:aren't|can't|couldn't|didn't|doesn't|don't|hadn't|hasn't|haven't|isn't|"
+    r"mustn't|shouldn't|wasn't|weren't|won't|wouldn't)\b", re.IGNORECASE)
+NEGATIVE_EXPANSIONS = {
+    "aren't": "are not", "can't": "cannot", "couldn't": "could not", "didn't": "did not",
+    "doesn't": "does not", "don't": "do not", "hadn't": "had not", "hasn't": "has not",
+    "haven't": "have not", "isn't": "is not", "mustn't": "must not", "shouldn't": "should not",
+    "wasn't": "was not", "weren't": "were not", "won't": "will not", "wouldn't": "would not",
+}
+
+
+def model_synthesis_text(text: str, engine: str) -> str:
+    """Avoid known negative-contraction artifacts in VITS and Pocket frontends."""
+    if engine not in {"vits", "piper", "pocket"}:
+        return text
+    def expand(match):
+        replacement = NEGATIVE_EXPANSIONS[match.group(0).lower()]
+        return replacement.capitalize() if match.group(0)[0].isupper() else replacement
+    return NEGATIVE_CONTRACTIONS.sub(expand, text)
+
+
 def synthesis_chunks(text: str, max_characters: int = 360) -> list[str]:
     """Make bounded, non-overlapping sentence groups for fragile local models."""
     cleaned = normalize_synthesis_text(text)
@@ -975,7 +996,8 @@ class Broker:
 
             for chunk in chunks:
                 if cancelled.is_set(): break
-                engine.synthesize(chunk, int(voice.get("speaker_id", 0)), speed,
+                model_text = model_synthesis_text(chunk, model.get("engine", ""))
+                engine.synthesize(model_text, int(voice.get("speaker_id", 0)), speed,
                                   coalesced, cancelled, profile)
         finally:
             engine.lock.release()

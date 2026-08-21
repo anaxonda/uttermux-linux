@@ -56,6 +56,14 @@ class ProtocolTests(unittest.TestCase):
     def test_shared_normalization_does_not_apply_external_chunking(self):
         self.assertEqual(self.u.normalize_synthesis_text("A\u00adB™\n\nC"), "AB C")
 
+    def test_vits_and_pocket_expand_negative_contractions(self):
+        text = "Wasn't ready and didn't answer."
+        self.assertEqual(self.u.model_synthesis_text(text, "vits"),
+                         "Was not ready and did not answer.")
+        self.assertEqual(self.u.model_synthesis_text(text, "pocket"),
+                         "Was not ready and did not answer.")
+        self.assertEqual(self.u.model_synthesis_text(text, "kokoro"), text)
+
     def test_kokoro_chunks_share_one_audio_header(self):
         broker = object.__new__(self.u.Broker)
         model = {"id": "kokoro", "engine": "kokoro"}; voice = {"speaker_id": 2}
