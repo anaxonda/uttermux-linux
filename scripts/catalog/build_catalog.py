@@ -199,14 +199,29 @@ def render_markdown(document: dict[str, Any]) -> str:
     voices_by_variant: dict[str, int] = {}
     for voice in document["voices"]:
         voices_by_variant[voice["variantId"]] = voices_by_variant.get(voice["variantId"], 0) + 1
+    piper = [item for item in variants if item["modelId"] == "piper"]
+    curated = [item for item in variants if item["modelId"] != "piper"]
+    piper_voice_count = sum(voices_by_variant.get(item["id"], 0) for item in piper)
+    piper_languages = sorted({language for item in piper for language in item["languages"]})
+    piper_ready = sum(item["status"] == "downloadable" for item in piper)
     lines = [
-        "# Model catalog", "",
-        "This file is generated from the reviewed UtterMux catalog sources. Do not edit it by hand.", "",
-        f"{len(document['models'])} model families, {len(variants)} variants, and {len(document['voices'])} voices.", "",
-        "| Variant | Runtime | Platforms | Languages | Voices | Download | RAM | Precision | Status | License |",
+        "# Local artifact catalog", "",
+        "This page is generated from release-pinned UtterMux catalog inputs. Do not edit it by hand.", "",
+        "It describes local artifacts in the shared interoperability catalog. It is not a cloud-voice list, "
+        "an inventory of installed files, or a claim that every catalog voice is exposed by every platform. "
+        "Applications may expand a multi-speaker artifact from its model metadata or expose a reviewed subset. "
+        "A platform name means that an integration path exists; benchmark results and recommendations remain "
+        "specific to an artifact, runtime, and hardware profile.", "",
+        f"The machine-readable catalog contains {len(document['models'])} families, {len(variants)} artifact variants, "
+        f"and {len(document['voices'])} explicit voice records. Of those, Piper contributes {len(piper)} variants "
+        f"and {piper_voice_count} speaker records.", "",
+        "## Curated runtime variants", "",
+        "`Voice records` counts entries stored in the shared catalog, not every speaker that a platform can derive "
+        "from an artifact. Zero is expected for profile-based cloning models and platform-expanded speaker tables.", "",
+        "| Variant | Runtime | Platforms | Languages | Voice records | Download | Est. RAM | Precision | Release status | License |",
         "|---|---|---|---|---:|---:|---:|---|---|---|",
     ]
-    for item in variants:
+    for item in curated:
         source = item.get("sourceUrl", "")
         label = f"[{item['id']}]({source})" if source else f"`{item['id']}`"
         lines.append(
@@ -215,6 +230,22 @@ def render_markdown(document: dict[str, Any]) -> str:
             f"{item['downloadSizeMb']} MiB | {item['estimatedRamMb']} MiB | "
             f"{item['quantization'] or '—'} | {item['status']} | {item['license'] or '—'} |"
         )
+    lines.extend([
+        "", "## Piper snapshot", "",
+        f"The pinned Piper source contributes {len(piper)} variants across {len(piper_languages)} BCP-47 language "
+        f"tags. {piper_ready} have checksum-pinned downloadable artifacts; the remaining "
+        f"{len(piper) - piper_ready} records preserve upstream identity but are marked `unavailable`.", "",
+        "The full per-variant URLs, checksums, sizes, speaker IDs, preview URLs, licenses, and platform flags are "
+        "in [`catalog/v2/catalog.json`](../catalog/v2/catalog.json). Keeping the thousands of generated Piper "
+        "speaker rows in JSON avoids turning this human-readable overview into an unwieldy table.", "",
+        "## Interpreting the fields", "",
+        "- **Download** is compressed transfer size rounded to MiB; zero means no verified downloadable artifact.",
+        "- **Est. RAM** is advisory catalog metadata, not a minimum requirement or a benchmark result.",
+        "- **Release status** describes catalog availability (`downloadable`, `device-preview`, or `unavailable`); it "
+        "does not predict real-time performance on a particular computer or phone.",
+        "- Online providers are discovered at runtime and are documented separately in "
+        "[`cloud-providers.md`](cloud-providers.md).",
+    ])
     return "\n".join(lines) + "\n"
 
 

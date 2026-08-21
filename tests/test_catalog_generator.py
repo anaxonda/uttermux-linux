@@ -14,11 +14,16 @@ SPEC.loader.exec_module(builder)
 
 class CatalogGeneratorTest(unittest.TestCase):
     def test_curated_catalog_has_stable_variants_and_qwen_platform(self):
-        document = builder.build(ROOT / "catalog/catalog.toml", None)
+        document = builder.build(
+            ROOT / "catalog/catalog.toml", None, ROOT / "catalog/platform-variants.toml"
+        )
         variants = {item["id"]: item for item in document["variants"]}
         self.assertEqual(2, document["schemaVersion"])
         self.assertEqual(["linux"], variants["qwen3-tts-0.6b-customvoice"]["platforms"])
         self.assertEqual("qwen-safetensors", variants["qwen3-tts-0.6b-customvoice"]["runtimeId"])
+        self.assertEqual(["linux"], variants["sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"]["platforms"])
+        self.assertEqual(["android"], variants["kokoro-multi-lang-v1_1"]["platforms"])
+        self.assertEqual(["android"], variants["vits-inflect-en-micro-v2"]["platforms"])
         self.assertIn("local/kokoro-multi-lang-v1_0/af-bella", {v["id"] for v in document["voices"]})
 
     def test_piper_snapshot_expands_speakers_and_hides_unverified_bundle(self):

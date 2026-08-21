@@ -175,6 +175,7 @@ id = "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"
 engine = "zipvoice"
 family = "ZipVoice"
 description = "ZipVoice Distill INT8 English/Chinese zero-shot voice cloning"
+platforms = ["linux"]
 url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2"
 sha256 = "77219c8b40f4ee8d73a7f902305ff6c1128ef9b54461c41b4ca6ed890b6c2803"
 size = 163320894

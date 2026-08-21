@@ -1,6 +1,41 @@
 schema_version = 1
 
 [[model]]
+id = "vits-inflect-en-micro-v2"
+engine = "vits"
+family = "Inflect"
+description = "Inflect Micro v2 compact English voice"
+platforms = ["android"]
+url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-inflect-en-micro-v2.tar.bz2"
+sha256 = "ed3c594d9c49b6c64ffe27f4b368ea8a700bcc27ff80610771408ee81cd96574"
+size = 45088768
+estimated_ram_mb = 120
+quantization = "FP32"
+performance_class = "fast"
+license = "Apache-2.0"
+source_url = "https://huggingface.co/owensong/Inflect-Micro-v2"
+files = { model = "model.onnx", tokens = "tokens.txt", data_dir = "espeak-ng-data" }
+voices = [{ id = "default", name = "Inflect Micro", language = "en-US", speaker_id = 0 }]
+
+[[model]]
+id = "kokoro-multi-lang-v1_1"
+engine = "kokoro"
+family = "Kokoro"
+description = "Kokoro 82M multilingual v1.1 FP32 model"
+platforms = ["android"]
+url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_1.tar.bz2"
+sha256 = "a3f4c73d043860e3fd2e5b06f36795eb81de0fc8e8de6df703245edddd87dbad"
+size = 364904448
+estimated_ram_mb = 700
+quantization = "FP32"
+performance_class = "heavy"
+license = "Apache-2.0"
+source_url = "https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese-English/kokoro-multi-lang-v1_1.html"
+languages = ["en", "zh"]
+files = { model = "model.onnx", voices = "voices.bin", tokens = "tokens.txt", data_dir = "espeak-ng-data", lexicon = "lexicon-us-en.txt" }
+voices = []
+
+[[model]]
 id = "qwen3-tts-0.6b-base-q4km"
 engine = "qwen-gguf"
 family = "Qwen3-TTS"

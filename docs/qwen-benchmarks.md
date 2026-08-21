@@ -25,7 +25,8 @@ moderate sentence produced these cold wall-clock results:
 | 8 | 35.76 s | 9.68 s | 3.69 |
 
 Four physical-core threads are optimal. The persistent companion removes model
-startup but cannot reduce autoregressive compute below real time on this CPU.
+startup but cannot reduce autoregressive compute below real time on the tested
+i7-8650U CPU.
 The runtime's command help still describes INT4 as 1.7B-only, but source review
 shows that the 0.6B path quantizes both the Talker and Code Predictor. A second
 run used the same pinned revision, four threads, Aiden, and the CLI's default
@@ -59,10 +60,10 @@ matrix-core support; Vulkan saves reported process RSS but increases latency.
 
 ## Decision
 
-Keep the official persistent INT8 companion as the optional desktop Qwen
-backend because it is the best tested implementation here. Mark it heavy and do
-not recommend it for continuous narration on this reference system. Piper,
-Kitten, Kokoro, Pocket, or a cloud provider remain the practical reader routes.
+Keep the official persistent INT8 companion as the desktop Qwen backend because
+it is the best-tested UtterMux implementation. The i7-8650U measurements do not
+meet the continuous-narration target, so the catalog marks the artifact heavy
+and relies on per-system benchmarking rather than a universal recommendation.
 
 Revisit local Qwen when at least one of these is available:
 
@@ -72,8 +73,21 @@ Revisit local Qwen when at least one of these is available:
 - a smaller official Qwen TTS checkpoint.
 
 Android currently has a gated 0.6B Base Q4_K_M device-preview variant and
-persists a prepared speaker embedding for each cloned voice. The model is not
-recommended for reader use on the reference Galaxy S10: it did not produce its
-first callback within three minutes and used about 1.5 GiB PSS. More recent,
-faster phones may run it, but each runtime/quantization pair must pass the same
-saved benchmark before its status can be promoted.
+persists a prepared speaker embedding for each cloned voice. It is excluded
+from automatic fallback: on the documented Galaxy S10 benchmark it did not
+produce its first callback within three minutes and used about 1.5 GiB PSS.
+That measurement does not classify newer phones. Each runtime, quantization,
+and hardware combination needs its own saved benchmark.
+
+## Deployment references
+
+- [qwen3-tts.cpp](https://github.com/Danmoreng/qwen3-tts.cpp) supplies a native
+  GGML/GGUF runtime, C API, and JNI bindings for Linux and Android.
+- [qwen3-tts-android](https://github.com/Danmoreng/qwen3-tts-android) demonstrates
+  Q4_K_M Qwen3-TTS with on-device voice-profile extraction behind Android's
+  system TTS interface.
+- [qwen3-tts-apple-silicon](https://github.com/kapi2800/qwen3-tts-apple-silicon),
+  [gabriele-mastrapasqua/qwen3-tts](https://github.com/gabriele-mastrapasqua/qwen3-tts),
+  and [swift-qwen3-tts](https://github.com/AtomGradient/swift-qwen3-tts) provide
+  independent MLX or Metal implementations for M-series Macs. Their results
+  are acceleration references, not UtterMux benchmark results.

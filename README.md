@@ -27,16 +27,13 @@ provider credentials, automatic language routing, cloning, caching, and
 cancellation behind it.
 
 ```text
-Firefox · Zotero · spd-say · KOReader · selection shortcut
-                            │
-                    Speech Dispatcher
-                            │
-                       sd_uttermux
-                            │
-                        uttermuxd
-             ┌──────────────┼──────────────┐
-        local inference    free network       hosted APIs
-   Piper/Kokoro/etc.          Edge       ElevenLabs/Azure/etc.
+SSIP / Speech Dispatcher clients
+              │
+         sd_uttermux
+              │
+          uttermuxd
+   ┌─────────┼──────────┼──────────┐
+ local models   Edge service   hosted APIs
 ```
 
 The GTK application has the same four top-level areas as the Android app:
@@ -51,8 +48,8 @@ The GTK application and CLI operate on the same catalog and configuration.
 
 ## Features
 
-- Native Firefox Web Speech API and Zotero Read Aloud integration through
-  Speech Dispatcher.
+- A standard Speech Dispatcher interface for desktop applications and Web
+  Speech implementations that use the system speech service.
 - Persistent local models, bounded LRU model caching, and optional startup
   preload for the active voice.
 - Local and cloud voices in one searchable catalog.
@@ -62,7 +59,8 @@ The GTK application and CLI operate on the same catalog and configuration.
 - Voice preview and local model downloads.
 - Pocket and ZipVoice local cloning plus ElevenLabs Instant Voice Cloning.
 - Tray icon that opens the normal application.
-- Compatibility bridge for the existing KOReader localhost TTS plugin.
+- Optional compatibility adapter for clients that use the legacy localhost
+  PCM protocol instead of Speech Dispatcher.
 - Cancellation without changing voices halfway through an utterance.
 
 ## Models available in the Linux app
@@ -92,13 +90,14 @@ means a reference recording must be configured before a system voice exists.
 | Pocket | Yes; presets and profiles | Yes; presets and profiles | Reference-conditioned cloning |
 | Kokoro | v1.0 FP32 | v1.0 and v1.1 FP32 | INT8 and FP8 are not included |
 | ZipVoice Distill | Profile; INT8 | No | Linux requires reference audio and transcript |
-| MOSS-TTS-Nano | Companion adapter; FP32 | No | Android evaluation failed sustained-reader acceptance |
+| MOSS-TTS-Nano | Companion adapter; FP32 | FP32; explicit heavy download | Benchmark before sustained reading |
 | Qwen3-TTS 0.6B | Companion adapter; CustomVoice | Base Q4_K_M device preview; cloning profiles | Separate persistent Linux and GGUF Android runtimes |
 
 The hand-maintained artifact table previously in this README was incomplete.
-The [generated complete model index](docs/MODELS.generated.md) is now the
-authoritative table of every variant, platform, runtime, language, voice count,
-download size, RAM estimate, precision, status, and license. See
+The [generated local artifact index](docs/MODELS.generated.md) is the
+authoritative overview of release-pinned variants and links to the complete
+machine-readable catalog. Multi-speaker runtimes can expose more voices than
+the explicit interoperability records counted by that page. See
 [catalog architecture](docs/CATALOG.md) for how it is produced and synchronized
 with Android.
 
@@ -160,9 +159,11 @@ test system. It is installed only by an explicit model-install action because
 its 728 MiB transfer and roughly 1.4 GiB working set are substantial. See
 [MOSS benchmark notes](docs/moss-benchmarks.md).
 
-Qwen works but is too slow for continuous reading on the older i7-8650U
-reference laptop. The current UtterMux adapter is a CPU path; no GPU claim is
-made. Faster systems require their own benchmark before continuous-reading use.
+On the documented i7-8650U CPU benchmark, Qwen3-TTS 0.6B did not sustain
+real-time generation. The result characterizes that runtime and hardware
+combination, not Qwen support on newer CPUs or supported accelerators. The
+current UtterMux adapter is CPU-only; benchmark each installed artifact before
+using it for continuous narration.
 See [Qwen benchmark notes](docs/qwen-benchmarks.md).
 
 ## Install
@@ -483,10 +484,11 @@ permissions under `~/.local/share/uttermux/voice-profiles`.
 Prepared runtime data is stored as named, checksummed schema-2 artifacts beside
 the recording. Schema-1 voice bundles remain importable.
 
-## KOReader desktop bridge
+## Legacy localhost compatibility adapter
 
-The optional bridge preserves the localhost API used by the existing KOReader
-TTS plugin while delegating voice selection and routing to UtterMux:
+The optional adapter preserves the localhost PCM API used by some reader
+plugins while delegating voice selection and routing to UtterMux. Applications
+that already use Speech Dispatcher do not need it:
 
 ```sh
 systemctl --user disable --now koreader-tts-edge.service
@@ -508,8 +510,8 @@ follows the global UtterMux voice and language fallbacks.
 | UI state | `~/.local/state/uttermux/ui.json` |
 
 The broker owns synthesis and configuration. The GTK process can be closed;
-Firefox, Zotero, KOReader, and Speech Dispatcher continue to work through the
-socket-activated user service.
+Speech Dispatcher clients and the optional localhost adapter continue to work
+through socket-activated user services.
 
 ## Development
 
@@ -525,7 +527,7 @@ Architecture and benchmark notes:
 - [Android/desktop catalog contract](docs/DESKTOP_PARITY.md)
 - [Catalog generation and synchronization](docs/CATALOG.md)
 - [Catalog schema v2](docs/interop/catalog-v2.schema.json)
-- [Generated complete model index](docs/MODELS.generated.md)
+- [Generated local artifact index](docs/MODELS.generated.md)
 - [MOSS-TTS-Nano experiments](docs/moss-benchmarks.md)
 - [Kokoro runtime experiments](docs/kokoro-benchmarks.md)
 - [Pocket TTS runtime experiments](docs/pocket-benchmarks.md)
@@ -553,10 +555,22 @@ Related projects and design references:
   synthesis, bounded buffering, playback, and cancellation.
 - [HayaiTTS](https://github.com/HayaiApp/HayaiTTS) is a similar Android system
   engine built around sherpa-onnx and a large offline catalog.
+- [qwen3-tts.cpp](https://github.com/Danmoreng/qwen3-tts.cpp) provides the
+  GGML/GGUF C++ and JNI runtime used by the Android Qwen experiment;
+  [qwen3-tts-android](https://github.com/Danmoreng/qwen3-tts-android)
+  demonstrates it as an Android system engine.
+- [qwen3-tts-apple-silicon](https://github.com/kapi2800/qwen3-tts-apple-silicon),
+  [qwen3-tts](https://github.com/gabriele-mastrapasqua/qwen3-tts), and
+  [swift-qwen3-tts](https://github.com/AtomGradient/swift-qwen3-tts) are
+  independent MLX/Metal deployment references for Apple silicon.
+- [PocketTTS.cpp](https://github.com/VolgaGerm/PocketTTS.cpp) informed the
+  experimental Pocket pipeline and prepared-reference cache measurements.
+- [speech-android](https://github.com/soniqo/speech-android) documents a
+  bounded short-turn Kokoro graph and its required split/retry safeguards.
+- [tts-onnx](https://github.com/runableapp/tts-onnx) is a Linux ONNX TTS daemon
+  and service deployment reference.
 - [Read Aloud](https://github.com/ken107/read-aloud) covers many browser cloud
   providers; its provider contracts informed UtterMux's online adapters.
-- [KOReader](https://github.com/koreader/koreader), Firefox Reader View, and
-  Zotero Read Aloud are interoperability targets, not embedded components.
 
 Contributions should keep stable voice IDs, BCP-47 language metadata,
 cancellation, and application highlighting semantics intact. A provider must

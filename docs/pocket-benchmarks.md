@@ -25,7 +25,7 @@ two warm requests.
 UtterMux therefore defaults Pocket to two threads independently of the
 four-thread default used by Kokoro and most other sherpa models. Three
 refinement steps remain the desktop quality default because their warm cost was
-small on this system.
+small on the documented i7-8650U benchmark.
 
 ## PocketTTS.cpp candidate
 

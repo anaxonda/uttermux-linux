@@ -15,7 +15,7 @@ change; Android never downloads a mutable catalog during its build. Cloud voice
 lists are discovered by provider adapters at runtime and are not part of this
 static contract.
 
-The desktop migration will preserve the existing Speech Dispatcher boundary.
+The desktop implementation preserves the Speech Dispatcher boundary.
 The broker and CLI, rather than the GTK process, will own configuration and
 synthesis. The required JSON commands are:
 
@@ -27,8 +27,9 @@ synthesis. The required JSON commands are:
 | `uttermux settings-schema --json` | provider fields and safe playback controls |
 
 The GTK interface mirrors the Android information architecture: Voices for
-discovery/defaults, Create for Pocket/ZipVoice/ElevenLabs clone workflows, and
-Settings for providers, routing, storage, advanced playback, and diagnostics.
+discovery/defaults, Create for Pocket/ZipVoice/ElevenLabs clone workflows, Test
+& tune for artifact benchmarks and overrides, and Settings for providers,
+routing, storage, advanced playback, and diagnostics.
 It invokes broker/CLI operations and does not edit TOML directly. A separate
 StatusNotifierItem opens the ordinary window; Waybar only needs its standard
 tray module.

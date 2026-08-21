@@ -26,9 +26,11 @@ per-chunk latency.
 `kokoro-int8-multi-lang-v1_1` was tested in an isolated broker with four
 threads. Cold RTF was 2.51; warm RTF was 2.09–2.19, with 9.14–9.58 seconds to
 first audio. The runtime also reported skipped phonemes for the test sentence.
-This is slower and less reliable than FP32 on the reference x86 system, and
-known ARM regressions make it unsuitable as an Android default. UtterMux does
-not expose this artifact as a recommended runnable variant.
+This is slower and less reliable than FP32 on the documented x86 benchmark.
+Separate Android/ARM tests produced rail-pinned audio, tones, and performance
+regressions, so UtterMux does not expose that exact artifact as a recommended
+variant. This is an artifact/runtime result, not a general conclusion about
+INT8 Kokoro on all hardware.
 
 ## Short-turn graph
 

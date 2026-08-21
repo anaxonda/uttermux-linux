@@ -11,16 +11,21 @@ The reviewed sources are:
 - `catalog/sources/piper.json` for the pinned Piper discovery snapshot.
 
 `scripts/catalog/build_catalog.py` deterministically produces
-`catalog/v2/catalog.json` and `docs/MODELS.generated.md`. The output separates
-model families, runtime variants, voices, artifacts, and platform eligibility.
+`catalog/v2/catalog.json` and `docs/MODELS.generated.md`. The JSON separates
+model families, runtime variants, explicit interoperability voice records,
+artifacts, and platform eligibility. The Markdown page summarizes curated
+variants and the pinned Piper snapshot; it deliberately does not reproduce
+thousands of Piper speaker rows.
 URLs, SHA-256 hashes, sizes, licenses, and provenance are release data. CI fails
 when either generated file is stale.
 
 Linux currently reads the reviewed TOML catalog at runtime and installs the
-schema-2 JSON as the cross-platform contract. Android embeds a copy of the
-schema-2 JSON and projects only variants marked for Android. The two projects
-therefore share identity and artifact metadata while retaining different
-runtimes and acceptance decisions where required.
+schema-2 JSON as the cross-platform contract. Android embeds a checksum-locked
+copy of the JSON and projects only variants marked for Android. Platform code
+may expand speakers from model metadata or deliberately expose a reviewed
+subset, so the number of explicit JSON voice records is not an exhaustive UI
+voice count. The projects share stable identity and artifact metadata while
+retaining platform-specific runtimes and acceptance decisions.
 
 Updating a local model follows this sequence:
 
@@ -54,7 +59,7 @@ discovery never enables a paid provider as an automatic fallback.
 | --- | --- | --- |
 | Model family and stable variant IDs | Yes | — |
 | Artifact URL, hash, size, and license | Yes | — |
-| Voice and BCP-47 language metadata | Yes | A platform may expose a subset |
+| Explicit voice IDs and BCP-47 metadata | Yes | A platform may expand or expose a subset |
 | Runtime implementation | Contract name | JNI/Android service or Linux broker/module |
 | Variant acceptance | Test criteria | Hardware and client results |
 | Cloud voice list | Provider contract | Discovered live by each app |

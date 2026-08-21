@@ -48,7 +48,8 @@ Incremental codec decoding is considerably more expensive:
 | 24 frames | 2.12 s | 1.01 |
 
 The variation between runs is normal for sampled generation, but the result is
-consistent: small low-latency codec batches cannot keep up on this CPU, while
+consistent: small low-latency codec batches cannot keep up on the tested
+i7-8650U CPU, while
 large batches approach real time only by increasing startup latency.
 
 ## Integration finding
@@ -79,15 +80,15 @@ generation/decoder workers:
 
 Using four intra-op threads in both concurrent stages oversubscribed this
 four-core/eight-thread CPU and regressed to RTF 1.18–1.27. Two threads per stage
-is the appropriate starting point on this machine.
+is the appropriate starting point for the documented i7-8650U benchmark.
 
 ## Decision
 
 The parallel producer/decoder adapter is now integrated as an optional local
 companion. It has bounded frame and PCM queues, cancellation, persistent model
 loading, four-frame codec batches, and no artificial inter-chunk silence. The
-model is fast enough on the reference CPU when its stages overlap. Continuous
-KOReader/Librera/Firefox testing is still required before recommending it as a
+model is fast enough on the documented CPU when its stages overlap. Sustained
+multi-request reader testing is still required before recommending it as a
 default, particularly to detect audible seams at internal 75-token boundaries.
 
 There is currently no official INT8 or static-KV-cache ONNX artifact. Further

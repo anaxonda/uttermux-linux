@@ -23,7 +23,9 @@
       "id": "kokoro",
       "languages": [
         "en-US",
-        "en-GB"
+        "en-GB",
+        "en",
+        "zh"
       ],
       "library": "Kokoro",
       "sourceUrl": "https://huggingface.co/hexgrad/Kokoro-82M"
@@ -194,11 +196,11 @@
     }
   ],
   "provenance": {
-    "curatedSha256": "7397d6122be7982455877117d28dde4bb1a243ece1961d76de9955a5565db923",
+    "curatedSha256": "f93975a6b411d645aa0a3d0ef28b9d4061be12f6b3a3600d203f8d69c57c3c1e",
     "curatedSource": "catalog.toml",
     "piperSha256": "636e877eacf3c2904aa6aa8088c867bd3cd9df7f39d2023b73d0660a59249c19",
     "piperSource": "piper.json",
-    "platformSha256": "72f8e9ad3d39a0f92c69180761916cd30b0ca5c709971039573ca4a83013578c",
+    "platformSha256": "88ed2a1ebb485a789864ad14a530a285bbeae6947e629df84379ed4365a24dbd",
     "platformSource": "platform-variants.toml"
   },
   "providers": [
@@ -337,6 +339,45 @@
       "quantization": "FP32",
       "runtimeId": "sherpa-onnx",
       "sourceUrl": "https://huggingface.co/hexgrad/Kokoro-82M",
+      "status": "downloadable"
+    },
+    {
+      "artifacts": [
+        {
+          "id": "bundle",
+          "role": "bundle",
+          "sha256": "a3f4c73d043860e3fd2e5b06f36795eb81de0fc8e8de6df703245edddd87dbad",
+          "sizeBytes": 364904448,
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_1.tar.bz2"
+        }
+      ],
+      "capabilities": [],
+      "downloadSizeMb": 348,
+      "engine": "kokoro",
+      "estimatedRamMb": 700,
+      "files": {
+        "data_dir": "espeak-ng-data",
+        "lexicon": "lexicon-us-en.txt",
+        "model": "model.onnx",
+        "tokens": "tokens.txt",
+        "voices": "voices.bin"
+      },
+      "id": "kokoro-multi-lang-v1_1",
+      "languages": [
+        "en",
+        "zh"
+      ],
+      "license": "Apache-2.0",
+      "location": "on-device",
+      "modelId": "kokoro",
+      "performanceClass": "heavy",
+      "platforms": [
+        "android"
+      ],
+      "providerId": "local",
+      "quantization": "FP32",
+      "runtimeId": "sherpa-onnx",
+      "sourceUrl": "https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese-English/kokoro-multi-lang-v1_1.html",
       "status": "downloadable"
     },
     {
@@ -693,13 +734,48 @@
       "modelId": "zipvoice",
       "performanceClass": "heavy",
       "platforms": [
-        "linux",
-        "android"
+        "linux"
       ],
       "providerId": "local",
       "quantization": "INT8",
       "runtimeId": "sherpa-onnx",
       "sourceUrl": "https://github.com/k2-fsa/ZipVoice",
+      "status": "downloadable"
+    },
+    {
+      "artifacts": [
+        {
+          "id": "bundle",
+          "role": "bundle",
+          "sha256": "ed3c594d9c49b6c64ffe27f4b368ea8a700bcc27ff80610771408ee81cd96574",
+          "sizeBytes": 45088768,
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-inflect-en-micro-v2.tar.bz2"
+        }
+      ],
+      "capabilities": [],
+      "downloadSizeMb": 43,
+      "engine": "vits",
+      "estimatedRamMb": 120,
+      "files": {
+        "data_dir": "espeak-ng-data",
+        "model": "model.onnx",
+        "tokens": "tokens.txt"
+      },
+      "id": "vits-inflect-en-micro-v2",
+      "languages": [
+        "en-US"
+      ],
+      "license": "Apache-2.0",
+      "location": "on-device",
+      "modelId": "inflect",
+      "performanceClass": "fast",
+      "platforms": [
+        "android"
+      ],
+      "providerId": "local",
+      "quantization": "FP32",
+      "runtimeId": "sherpa-onnx",
+      "sourceUrl": "https://huggingface.co/owensong/Inflect-Micro-v2",
       "status": "downloadable"
     },
     {
@@ -7250,6 +7326,18 @@
       "referenceFile": "",
       "speakerId": "8",
       "variantId": "sherpa-onnx-supertonic-3-tts-int8-2026-05-11"
+    },
+    {
+      "gender": "",
+      "id": "local/vits-inflect-en-micro-v2/default",
+      "languages": [
+        "en-US"
+      ],
+      "name": "Inflect Micro",
+      "previewUrl": "",
+      "referenceFile": "",
+      "speakerId": "0",
+      "variantId": "vits-inflect-en-micro-v2"
     },
     {
       "gender": "",
