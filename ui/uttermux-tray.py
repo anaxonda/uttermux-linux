@@ -57,10 +57,10 @@ class Tray:
         if interface == "org.kde.StatusNotifierItem":
             values = {"Category": GLib.Variant("s", "ApplicationStatus"), "Id": GLib.Variant("s", "uttermux"),
                 "Title": GLib.Variant("s", self.title), "Status": GLib.Variant("s", "Active"),
-                "WindowId": GLib.Variant("u", 0), "IconName": GLib.Variant("s", "audio-speakers-symbolic"),
+                "WindowId": GLib.Variant("u", 0), "IconName": GLib.Variant("s", "io.uttermux.App-symbolic"),
                 "IconPixmap": GLib.Variant("a(iiay)", []), "OverlayIconName": GLib.Variant("s", ""),
                 "AttentionIconName": GLib.Variant("s", ""),
-                "ToolTip": GLib.Variant("(sa(iiay)ss)", ("audio-speakers-symbolic", [], "UtterMux", self.title)),
+                "ToolTip": GLib.Variant("(sa(iiay)ss)", ("io.uttermux.App-symbolic", [], "UtterMux", self.title)),
                 "ItemIsMenu": GLib.Variant("b", False), "Menu": GLib.Variant("o", MENU_PATH)}
         else:
             values = {"Version": GLib.Variant("u", 4), "TextDirection": GLib.Variant("s", "ltr"),

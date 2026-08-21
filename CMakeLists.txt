@@ -61,6 +61,10 @@ install(FILES catalog/catalog.toml catalog/v2/catalog.json
         DESTINATION ${CMAKE_INSTALL_DATADIR}/uttermux)
 install(FILES config/uttermux.conf DESTINATION ${CMAKE_INSTALL_DATADIR}/speech-dispatcher/conf/modules)
 install(FILES data/io.uttermux.App.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES assets/icons/io.uttermux.App.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+install(FILES assets/icons/io.uttermux.App-symbolic.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/symbolic/apps)
 
 if(BUILD_TESTING)
   add_executable(core_tests tests/core_tests.cpp)

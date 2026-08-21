@@ -1,5 +1,7 @@
 # UtterMux
 
+<img src="assets/icons/io.uttermux.App.svg" width="112" alt="UtterMux jellyfish waveform logo">
+
 [![Linux CI](https://github.com/anaxonda/uttermux-linux/actions/workflows/linux.yml/badge.svg)](https://github.com/anaxonda/uttermux-linux/actions/workflows/linux.yml)
 
 Use local and online text-to-speech voices everywhere on Linux.

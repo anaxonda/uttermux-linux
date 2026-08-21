@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 108 108">
+  <defs>
+    <linearGradient id="background" x1="18" y1="10" x2="92" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#242244"/><stop offset="1" stop-color="#080b19"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="28" y1="18" x2="80" y2="92" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d4a7ff"/><stop offset="0.55" stop-color="#a566ff"/><stop offset="1" stop-color="#873dff"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="4" y="4" width="100" height="100" rx="24" fill="url(#background)" stroke="#554585" stroke-width="0.5"/>
+  <g fill="none" stroke="url(#ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <path d="M54 20C36 20 25 32 25 49c0 10-4 16-9 21-3 3-1 8 3 9 4 1 8-2 11-5-1 7 1 13 6 15 4 2 7-2 8-7l1-4c2 8 6 13 11 12 5-1 6-6 6-12 4 6 9 9 14 6 3-2 4-6 3-10 4 3 10 6 14 3 4-3 2-7-1-9-6-4-9-10-9-19 0-17-11-29-29-29z"/>
+    <path d="M42 48v10M48 43v20M54 38v30M60 44v18M66 49v9"/>
+  </g>
+</svg>

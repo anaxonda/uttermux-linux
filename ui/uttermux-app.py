@@ -594,7 +594,8 @@ class TunePage(Gtk.Box):
         seen, entries = set(), []
         for voice in catalog.get("voices", []):
             model = models.get(voice.get("modelId"), {})
-            if not voice.get("ready") or model.get("providerId") != "local" or model.get("id") in seen: continue
+            if (not voice.get("ready") or model.get("location") != "on-device" or
+                    model.get("providerId") not in {"local", "moss", "qwen"} or model.get("id") in seen): continue
             seen.add(model["id"]); entries.append((model, voice))
         self.status.set_text(f"{len(entries)} installed local artifact{'s' if len(entries) != 1 else ''}")
         for model, voice in sorted(entries, key=lambda item: (item[0].get("family", ""), item[0].get("name", ""))):
@@ -602,13 +603,17 @@ class TunePage(Gtk.Box):
             row.append(Gtk.Label(label=model.get("name", model["id"]), xalign=0, wrap=True))
             facts = " · ".join(filter(None, (model.get("family"), model.get("quantization"), model.get("version"))))
             row.append(Gtk.Label(label=facts, xalign=0, wrap=True))
-            controls = Gtk.Box(spacing=8); applied = int(tuning.get(model["id"], {}).get("threads", 0))
-            state = Gtk.Label(label=f"{applied} threads · Tuned" if applied else "Automatic/global tuning", xalign=0, hexpand=True)
+            controls = Gtk.Box(spacing=8); provider = model.get("providerId", "local")
+            applied = int(tuning.get(model["id"], {}).get("threads", 0)) if provider == "local" else 0
+            state_text = (f"{applied} threads · Tuned" if applied else "Automatic/global tuning") if provider == "local" else "Companion runtime · benchmarks current settings"
+            state = Gtk.Label(label=state_text, xalign=0, hexpand=True, wrap=True)
             controls.append(state)
             preview_spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER); controls.append(preview_spinner)
             preview = Gtk.Button(label="Preview"); preview.connect("clicked", self.preview, voice, preview_spinner); controls.append(preview)
-            run = Gtk.Button(label="Benchmark"); run.connect("clicked", self.benchmark, model, voice); controls.append(run)
-            reset = Gtk.Button(label="Reset", sensitive=applied > 0); reset.connect("clicked", self.reset, model["id"]); controls.append(reset)
+            run = Gtk.Button(label="Benchmark" if provider == "local" else "Benchmark current settings")
+            run.connect("clicked", self.benchmark if provider == "local" else self.confirm_companion_benchmark, model, voice); controls.append(run)
+            if provider == "local":
+                reset = Gtk.Button(label="Reset", sensitive=applied > 0); reset.connect("clicked", self.reset, model["id"]); controls.append(reset)
             row.append(controls); self.rows.append(row)
         return GLib.SOURCE_REMOVE
 
@@ -666,6 +671,44 @@ class TunePage(Gtk.Box):
                                          "Tuned profile applied", self.load)
                 else: self.load()
             dialog.choose(self.window, None, chosen); return GLib.SOURCE_REMOVE
+        threading.Thread(target=work, daemon=True).start()
+
+    def confirm_companion_benchmark(self, button, model, voice):
+        estimated = int(model.get("estimatedRamMb", 0))
+        dialog = Gtk.AlertDialog(message=f"Benchmark {model.get('name', model['id'])}?", detail=(
+            f"This runs three syntheses using the current companion settings and may use approximately "
+            f"{estimated or 'the documented'} MB RAM. UtterMux will refuse MOSS or Qwen if available "
+            "memory is below the model estimate plus a 2 GB reserve. No setting is applied automatically."),
+            buttons=["Cancel", "Benchmark"], cancel_button=0, default_button=1)
+        def chosen(_dialog, task):
+            try: choice = _dialog.choose_finish(task)
+            except GLib.Error: choice = 0
+            if choice == 1: self.benchmark_companion(button, model, voice)
+        dialog.choose(self.window, None, chosen)
+
+    def benchmark_companion(self, button, model, voice):
+        if self.running: return
+        self.running = True; button.set_sensitive(False); self.status.set_text(f"Benchmarking {model['id']} at current settings…")
+        def work():
+            result = subprocess.run(command("benchmark", voice["id"], "--runs", "3", "--json", "--save"),
+                                    text=True, capture_output=True)
+            GLib.idle_add(done, result)
+        def done(result):
+            self.running = False; button.set_sensitive(True)
+            if result.returncode:
+                self.status.set_text(result.stderr.strip() or "Benchmark failed"); return GLib.SOURCE_REMOVE
+            report = json.loads(result.stdout); summary = report["summary"]
+            runs = "\n".join(f"Run {index}: first PCM {run['firstAudioMs']:.0f} ms, "
+                             f"RTF {run['rtf']:.3f}, {run['audioSeconds']:.2f} s audio"
+                             for index, run in enumerate(report.get("runs", []), 1))
+            Gtk.AlertDialog(message="Benchmark completed", detail=(
+                f"{model.get('name', model['id'])}\nMedian RTF: {summary['medianRtf']:.3f}\n"
+                f"Median first PCM: {summary['medianFirstAudioMs']:.0f} ms\n"
+                f"Continuous reading: {'yes' if summary['continuousReading'] else 'no'}\n\n{runs}\n\n"
+                "This measured the current companion configuration; it did not apply a setting."),
+                buttons=["Close"]).show(self.window)
+            self.status.set_text(f"Benchmark completed for {model.get('name', model['id'])}")
+            return GLib.SOURCE_REMOVE
         threading.Thread(target=work, daemon=True).start()
 
     def reset(self, _button, model_id):
