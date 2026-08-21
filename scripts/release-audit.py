@@ -2,6 +2,7 @@
 """Offline checks for mistakes that should never reach a release tag."""
 
 import argparse
+import json
 from pathlib import Path
 import re
 import sys
@@ -30,6 +31,20 @@ def main() -> int:
         for asset in model.get("assets", []):
             if not re.fullmatch(r"[0-9a-f]{64}", asset.get("sha256", "")):
                 errors.append(f"{model_id}/{asset.get('file')}: missing SHA-256")
+    generated = ROOT / "catalog/v2/catalog.json"
+    if not generated.is_file():
+        errors.append("generated catalog v2 is missing")
+    else:
+        document = json.loads(generated.read_text(encoding="utf-8"))
+        if document.get("schemaVersion") != 2: errors.append("generated catalog has wrong schema")
+        variant_ids = [item.get("id") for item in document.get("variants", [])]
+        voice_ids = [item.get("id") for item in document.get("voices", [])]
+        if len(variant_ids) != len(set(variant_ids)): errors.append("generated catalog has duplicate variants")
+        if len(voice_ids) != len(set(voice_ids)): errors.append("generated catalog has duplicate voices")
+        known = set(variant_ids)
+        for voice in document.get("voices", []):
+            if voice.get("variantId") not in known:
+                errors.append(f"{voice.get('id')}: unknown variant {voice.get('variantId')}")
     for script in (ROOT / "scripts").iterdir():
         if script.suffix in {"", ".py"} and script.is_file() and not script.stat().st_mode & 0o111:
             errors.append(f"script is not executable: {script.relative_to(ROOT)}")

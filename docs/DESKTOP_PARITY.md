@@ -1,7 +1,7 @@
 # Android/Desktop parity contract
 
 UtterMux keeps the Linux and Android applications in separate repositories, but
-they use the versioned contract in `docs/interop/catalog-v1.schema.json` as the
+they use the generated versioned contract in `docs/interop/catalog-v2.schema.json` as the
 public vocabulary for providers, model variants, voices, profiles, and runtime
 state. Stable voice IDs use `provider/model/speaker@language`; installation and
 activity are runtime state and must not be encoded into static catalog records.

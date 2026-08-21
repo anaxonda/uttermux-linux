@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uttermux.io/schema/catalog-v2.json",
+  "title": "UtterMux cross-platform catalog",
+  "type": "object",
+  "required": ["schemaVersion", "providers", "models", "variants", "voices", "provenance"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "providers": {"type": "array", "items": {"type": "object", "required": ["id", "name", "network", "cost"]}},
+    "models": {"type": "array", "items": {"type": "object", "required": ["id", "library", "languages", "capabilities"]}},
+    "variants": {"type": "array", "items": {"type": "object", "required": ["id", "modelId", "providerId", "runtimeId", "engine", "location", "platforms", "status", "languages", "capabilities", "artifacts"], "properties": {
+      "location": {"enum": ["on-device", "cloud"]},
+      "platforms": {"type": "array", "items": {"enum": ["linux", "android"]}, "uniqueItems": true},
+      "status": {"enum": ["ready", "downloadable", "setup-required", "device-preview", "unavailable"]},
+      "artifacts": {"type": "array", "items": {"type": "object", "required": ["id", "role", "url", "sha256", "sizeBytes"], "properties": {
+        "url": {"type": "string", "pattern": "^https://"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "sizeBytes": {"type": "integer", "minimum": 0}
+      }}}
+    }}},
+    "voices": {"type": "array", "items": {"type": "object", "required": ["id", "variantId", "speakerId", "name", "languages"]}},
+    "provenance": {"type": "object", "required": ["curatedSource", "curatedSha256", "piperSource", "piperSha256"]}
+  },
+  "additionalProperties": false
+}

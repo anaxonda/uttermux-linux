@@ -21,7 +21,9 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: Validate release metadata
-        run: python scripts/release-audit.py --ci
+        run: |
+          python scripts/catalog/build_catalog.py --piper-source catalog/sources/piper.json --check
+          python scripts/release-audit.py --ci
 
   portable-prefix:
     runs-on: ubuntu-latest

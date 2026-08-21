@@ -57,7 +57,8 @@ install(PROGRAMS scripts/install-qwen DESTINATION ${CMAKE_INSTALL_LIBDIR}/utterm
 install(PROGRAMS scripts/install-moss DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux)
 install(PROGRAMS providers/moss_server.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME moss-server)
 install(FILES python/uttermux_profiles.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux)
-install(FILES catalog/catalog.toml DESTINATION ${CMAKE_INSTALL_DATADIR}/uttermux)
+install(FILES catalog/catalog.toml catalog/v2/catalog.json
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/uttermux)
 install(FILES config/uttermux.conf DESTINATION ${CMAKE_INSTALL_DATADIR}/speech-dispatcher/conf/modules)
 install(FILES data/io.uttermux.App.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 
@@ -69,4 +70,7 @@ if(BUILD_TESTING)
   target_link_libraries(engine_smoke PRIVATE sdsherpa_core)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME cli_tests COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tests -p test_*.py)
+  add_test(NAME generated_catalog
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/catalog/build_catalog.py
+                   --piper-source ${CMAKE_SOURCE_DIR}/catalog/sources/piper.json --check)
 endif()

@@ -86,7 +86,7 @@ means a reference recording must be configured before a system voice exists.
 | Kokoro | v1.0 FP32 | v1.0 and v1.1 FP32 | INT8 and FP8 are not included |
 | ZipVoice Distill | Profile; INT8 | No | Linux requires reference audio and transcript |
 | MOSS-TTS-Nano | Companion adapter; FP32 | No | Android evaluation failed sustained-reader acceptance |
-| Qwen3-TTS 0.6B | Companion adapter; CustomVoice | No | Android runtime is not integrated |
+| Qwen3-TTS 0.6B | Companion adapter; CustomVoice | Base Q4_K_M device preview; cloning profiles | Separate persistent Linux and GGUF Android runtimes |
 
 | Catalog artifact | Engine | Languages / voices exposed | Clone | Download | Est. RAM | Precision | Integration | Upstream |
 | --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |
@@ -387,7 +387,8 @@ python -m py_compile cli/uttermux daemon/uttermuxd.py ui/uttermux-app.py
 Architecture and benchmark notes:
 
 - [Android/desktop catalog contract](docs/DESKTOP_PARITY.md)
-- [Catalog schema](docs/interop/catalog-v1.schema.json)
+- [Catalog schema v2](docs/interop/catalog-v2.schema.json)
+- [Generated complete model index](docs/MODELS.generated.md)
 - [MOSS-TTS-Nano experiments](docs/moss-benchmarks.md)
 - [Qwen3-TTS experiments](docs/qwen-benchmarks.md)
 
