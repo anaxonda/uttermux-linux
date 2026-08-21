@@ -187,6 +187,13 @@ Open the manager from the application menu or run:
 uttermux-app
 ```
 
+To test an installed local voice in the manager, open **Voices**, press
+**Preview**, and watch the inline loading/playing indicator. Press **Test
+model** on that voice—or open **Test & tune**—to compare CPU-thread settings.
+The benchmark shows cold/warm first-audio latency, real-time factor (RTF), and
+peak memory, then asks before applying its proposed setting. It neither
+downloads another model nor evaluates voice quality.
+
 Useful CLI commands:
 
 ```sh

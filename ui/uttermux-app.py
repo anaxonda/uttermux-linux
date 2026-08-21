@@ -230,23 +230,32 @@ class VoicePage(Gtk.Box):
                 choose = Gtk.Button(label="Active" if record["id"] == self.default_id else "Use")
                 choose.set_sensitive(record["id"] != self.default_id)
                 choose.connect("clicked", self.choose, record); row.append(choose)
-                preview = Gtk.Button(label="Preview"); preview.connect("clicked", self.preview, record); row.append(preview)
+                spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER); row.append(spinner)
+                preview = Gtk.Button(label="Preview"); preview.connect("clicked", self.preview, record, spinner); row.append(preview)
+                if model.get("providerId") == "local":
+                    test = Gtk.Button(label="Test model"); test.connect("clicked", lambda *_args: self.window.show_test_page())
+                    row.append(test)
             elif model.get("location") == "on-device":
                 install = Gtk.Button(label="Download"); install.connect("clicked", self.install, record); row.append(install)
             self.listbox.append(row)
         self.status.set_text(f"{len(result)} voice{'s' if len(result) != 1 else ''}")
 
     def choose(self, _button, record): self.window.run_task(command("default", record["id"]), "Voice selected", self.load)
-    def preview(self, button, record):
-        button.set_sensitive(False); button.set_label("Playing…")
+    def preview(self, button, record, spinner):
+        button.set_sensitive(False); button.set_label("Loading / playing…")
+        spinner.set_visible(True); spinner.start()
+        self.status.set_text(f"Loading {record['name']} preview…")
         def work():
             result = subprocess.run(command("preview", record["id"], "This is an UtterMux voice preview."),
                                     text=True, capture_output=True)
             GLib.idle_add(done, result)
         def done(result):
+            spinner.stop(); spinner.set_visible(False)
             button.set_sensitive(True); button.set_label("Preview")
             if result.returncode:
                 self.window.alert("Preview failed", result.stderr.strip() or result.stdout.strip())
+                self.status.set_text(f"Preview failed for {record['name']}")
+            else: self.status.set_text(f"Preview completed for {record['name']}")
             return GLib.SOURCE_REMOVE
         threading.Thread(target=work, daemon=True).start()
     def install(self, _button, record): self.window.run_task(command("model", "install", record["modelId"]), "Model installed", self.load)
@@ -564,8 +573,8 @@ class TunePage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10,
                          margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
         self.window, self.running = window, False
-        heading = Gtk.Label(label="Tune this device", xalign=0); heading.add_css_class("title-2"); self.append(heading)
-        self.append(Gtk.Label(label="Benchmarks each installed artifact independently. Results measure performance, not speech quality.", xalign=0, wrap=True))
+        heading = Gtk.Label(label="Test and tune local models", xalign=0); heading.add_css_class("title-2"); self.append(heading)
+        self.append(Gtk.Label(label="Preview checks that a voice sounds correct. Benchmark measures startup, throughput, memory, and CPU thread choices for each installed artifact; it does not judge speech quality.", xalign=0, wrap=True))
         self.status = Gtk.Label(label="Loading installed models…", xalign=0, wrap=True); self.append(self.status)
         self.rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE); self.rows.add_css_class("boxed-list"); self.append(self.rows)
         refresh = Gtk.Button(label="Refresh"); refresh.connect("clicked", lambda *_: self.load()); self.append(refresh)
@@ -596,11 +605,27 @@ class TunePage(Gtk.Box):
             controls = Gtk.Box(spacing=8); applied = int(tuning.get(model["id"], {}).get("threads", 0))
             state = Gtk.Label(label=f"{applied} threads · Tuned" if applied else "Automatic/global tuning", xalign=0, hexpand=True)
             controls.append(state)
-            preview = Gtk.Button(label="Preview"); preview.connect("clicked", lambda _button, voice_id=voice["id"]: subprocess.Popen(command("preview", voice_id))); controls.append(preview)
+            preview_spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER); controls.append(preview_spinner)
+            preview = Gtk.Button(label="Preview"); preview.connect("clicked", self.preview, voice, preview_spinner); controls.append(preview)
             run = Gtk.Button(label="Benchmark"); run.connect("clicked", self.benchmark, model, voice); controls.append(run)
             reset = Gtk.Button(label="Reset", sensitive=applied > 0); reset.connect("clicked", self.reset, model["id"]); controls.append(reset)
             row.append(controls); self.rows.append(row)
         return GLib.SOURCE_REMOVE
+
+    def preview(self, button, voice, spinner):
+        if self.running: return
+        self.running = True; button.set_sensitive(False); button.set_label("Loading / playing…")
+        spinner.set_visible(True); spinner.start(); self.status.set_text(f"Loading {voice['name']} preview…")
+        def work():
+            result = subprocess.run(command("preview", voice["id"]), text=True, capture_output=True)
+            GLib.idle_add(done, result)
+        def done(result):
+            self.running = False; spinner.stop(); spinner.set_visible(False)
+            button.set_sensitive(True); button.set_label("Preview")
+            self.status.set_text((f"Preview completed for {voice['name']}" if result.returncode == 0 else
+                                  result.stderr.strip() or "Preview failed"))
+            return GLib.SOURCE_REMOVE
+        threading.Thread(target=work, daemon=True).start()
 
     def benchmark(self, button, model, voice):
         if self.running: return
@@ -613,9 +638,24 @@ class TunePage(Gtk.Box):
             if result.returncode:
                 self.status.set_text(result.stderr.strip() or "Benchmark failed"); return GLib.SOURCE_REMOVE
             report = json.loads(result.stdout); winner = report["winner"]
+            winner_group = next((group for group in report.get("candidates", [])
+                                 if group.get("threads") == winner["threads"]), {})
+            runs = winner_group.get("runs", [])
+            cold = next((run for run in runs if run.get("cold")), None)
+            candidate_lines = [
+                f"{group['threads']} thread{'s' if group['threads'] != 1 else ''}: "
+                f"RTF {group['medianRtf']:.3f}, first PCM {group['medianFirstAudioMs']:.0f} ms, "
+                f"peak {group['peakRssMb']} MB"
+                for group in report.get("candidates", [])]
+            metrics = [
+                f"Recommended: {winner['threads']} threads · {report['classification']}",
+                f"Warm/median first PCM: {winner['medianFirstAudioMs']:.0f} ms",
+                f"Peak broker memory: {winner['peakRssMb']} MB",
+            ]
+            if cold: metrics.append(f"Cold first PCM: {cold['firstAudioMs']:.0f} ms")
             dialog = Gtk.AlertDialog(message="Apply tuned profile?", detail=(
-                f"{model.get('name', model['id'])}: {winner['threads']} threads, "
-                f"RTF {winner['medianRtf']:.3f}, {report['classification']}.\n\n"
+                f"{model.get('name', model['id'])}\n" + "\n".join(metrics) +
+                "\n\nCandidates\n" + "\n".join(candidate_lines) + "\n\n"
                 "This measures performance, not voice quality, and does not change the model variant."),
                 buttons=["Keep current", "Apply"], cancel_button=0, default_button=1)
             def chosen(_dialog, task):
@@ -635,12 +675,15 @@ class TunePage(Gtk.Box):
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="UtterMux", default_width=920, default_height=720)
-        header = Gtk.HeaderBar(); stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
-        switcher = Gtk.StackSwitcher(stack=stack); header.set_title_widget(switcher); self.set_titlebar(header)
-        self.voices = VoicePage(self); stack.add_titled(self.voices, "voices", "Voices")
-        stack.add_titled(self.scrolled(CreatePage(self)), "create", "Create voice")
-        stack.add_titled(self.scrolled(TunePage(self)), "tune", "Tune")
-        stack.add_titled(self.scrolled(SettingsPage(self)), "settings", "Settings"); self.set_child(stack)
+        header = Gtk.HeaderBar(); self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        switcher = Gtk.StackSwitcher(stack=self.stack); header.set_title_widget(switcher); self.set_titlebar(header)
+        self.voices = VoicePage(self); self.stack.add_titled(self.voices, "voices", "Voices")
+        self.stack.add_titled(self.scrolled(CreatePage(self)), "create", "Create voice")
+        self.test_page = TunePage(self); self.stack.add_titled(self.scrolled(self.test_page), "tune", "Test & tune")
+        self.stack.add_titled(self.scrolled(SettingsPage(self)), "settings", "Settings"); self.set_child(self.stack)
+
+    def show_test_page(self):
+        self.stack.set_visible_child_name("tune")
 
     @staticmethod
     def scrolled(child):
