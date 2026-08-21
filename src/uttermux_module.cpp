@@ -178,10 +178,10 @@ int module_speak(char *data, size_t bytes, SPDMessageType) {
       language = current_language;
       rate = current_rate; pitch = current_pitch; volume = current_volume;
     }
-    uint64_t request = next_request++;
-    current_request.store(request);
     std::string text = text_from_ssml(std::string_view(data, bytes));
     if (text.empty()) return 0;
+    uint64_t request = next_request++;
+    current_request.store(request);
     worker = std::thread(speak_worker, std::move(text), std::move(selected_id),
                          std::move(language), rate, pitch, volume, request);
     return 1;
