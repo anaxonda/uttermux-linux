@@ -228,6 +228,7 @@ size = 763363328
 estimated_ram_mb = 1400
 quantization = "FP32 ONNX"
 performance_class = "heavy"
+platforms = ["linux", "android"]
 license = "Apache-2.0"
 source_url = "https://github.com/OpenMOSS/MOSS-TTS-Nano"
 capabilities = ["streaming", "multilingual"]

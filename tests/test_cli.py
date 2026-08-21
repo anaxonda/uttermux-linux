@@ -1,5 +1,6 @@
 import importlib.machinery
 import importlib.util
+import json
 import os
 from pathlib import Path
 import tarfile
@@ -7,6 +8,8 @@ import tempfile
 import unittest
 from unittest import mock
 import wave
+import argparse
+import io
 
 ROOT = Path(__file__).resolve().parents[1]
 loader = importlib.machinery.SourceFileLoader("sherpa_voice", str(ROOT / "cli/sherpa-voice"))
@@ -23,6 +26,16 @@ profiles = importlib.util.module_from_spec(profile_spec); profile_loader.exec_mo
 
 
 class CliTests(unittest.TestCase):
+    def test_cloud_provider_configuration_is_separate_and_mode_0600(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}), \
+             mock.patch.object(ut, "restart"), \
+             mock.patch.object(ut.sys, "stdin", io.StringIO('{"api_key":"secret","region":"eastus"}')):
+            ut.cmd_provider_config(argparse.Namespace(provider="azure"))
+            path=Path(directory)/"uttermux/credentials/azure.json"
+            self.assertEqual(json.loads(path.read_text())["api_key"],"secret")
+            self.assertEqual(path.stat().st_mode & 0o777,0o600)
+
     def test_cpu_recommendations_are_advisory_and_memory_aware(self):
         hardware = {"logicalCores": 8, "totalRamMb": 8000, "availableRamMb": 6000}
         self.assertEqual(ut.recommend_model({"location": "on-device", "estimatedRamMb": 180,

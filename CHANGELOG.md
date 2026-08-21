@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added Linux adapters and secure settings for OpenAI-compatible speech,
+  Azure Speech, hosted Qwen, Google Cloud TTS, Amazon Polly, Deepgram,
+  Cartesia, PlayHT, Resemble, and constrained custom PCM endpoints.
+- Added Debian/Ubuntu dependency installation and a checksum-verifying generic
+  source installer for other distributions.
+- Exposed the official MOSS FP32 artifact to the shared Android catalog as an
+  explicit heavy download.
 - Replaced the incomplete model table with generated catalog documentation and
   added an accurate cross-platform online-provider matrix.
 - Added a beta-aware one-line Arch installer with release checksum validation.

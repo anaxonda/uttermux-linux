@@ -8,9 +8,14 @@ if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
   exit 2
 fi
 
+if [[ -r /etc/debian_version ]] && command -v apt-get >/dev/null; then
+  printf '%s\n' 'Detected Debian/Ubuntu; starting the source package installer.'
+  exec bash < <(curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+    "$repo/raw/main/scripts/install-debian")
+fi
 if [[ ! -r /etc/arch-release ]] || ! command -v pacman >/dev/null; then
-  printf '%s\n' 'The one-line installer currently supports Arch Linux only.' >&2
-  printf '%s\n' 'Other distributions can use the source-build instructions in the README.' >&2
+  printf '%s\n' 'Automatic dependency installation supports Arch and Debian-family systems.' >&2
+  printf '%s\n' "Use: curl -fsSL $repo/raw/main/scripts/install-source | bash" >&2
   exit 2
 fi
 

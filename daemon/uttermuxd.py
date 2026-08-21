@@ -28,6 +28,9 @@ import urllib.error
 import urllib.request
 import wave
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 for _common in reversed((Path(__file__).resolve().parents[1] / "python", Path(__file__).resolve().parent,
                          Path("/usr/lib/uttermux"), Path("/usr/lib64/uttermux"),
                          Path("/usr/libexec/uttermux"), Path("/usr/local/lib/uttermux"))):
@@ -37,6 +40,10 @@ try:
     import uttermux_profiles
 except ImportError:
     uttermux_profiles = None
+try:
+    from cloud_providers import PROVIDERS as CLOUD_PROVIDERS
+except ImportError:
+    CLOUD_PROVIDERS = {}
 
 MAGIC = 0x58544D55
 VERSION = 1
@@ -886,10 +893,18 @@ class Broker:
                 self.voice_meta[voice_id] = (voice_id, f"{profile['name']} · {profile['engine'].title()}",
                     profile["language"], "local", model["id"], (profile["language"],), True)
         provider_config = self.config.get("providers", {})
-        for provider_name, provider_type in (("edge", EdgeProvider), ("elevenlabs", ElevenLabsProvider),
-                                             ("grok", GrokProvider), ("qwen", QwenProvider),
-                                             ("moss", MossProvider)):
+        provider_types = dict((("edge", EdgeProvider), ("elevenlabs", ElevenLabsProvider),
+                               ("grok", GrokProvider), ("qwen", QwenProvider),
+                               ("moss", MossProvider)))
+        provider_types.update(CLOUD_PROVIDERS)
+        credential_root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "uttermux/credentials"
+        for provider_name, provider_type in provider_types.items():
             cfg = provider_config.get(provider_name, {})
+            values_file = credential_root / f"{provider_name}.json"
+            if values_file.is_file():
+                try: cfg = {**cfg, **json.loads(values_file.read_text(encoding="utf-8"))}
+                except (OSError, ValueError, TypeError) as error:
+                    print(f"uttermuxd: invalid {provider_name} provider configuration: {error}", file=sys.stderr)
             if provider_name == "qwen":
                 cfg = dict(cfg)
                 override = self.config.get("model_overrides", {}).get("qwen3-tts-0.6b-customvoice", {})

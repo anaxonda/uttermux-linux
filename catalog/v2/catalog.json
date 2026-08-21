@@ -194,7 +194,7 @@
     }
   ],
   "provenance": {
-    "curatedSha256": "00c8953961f24ee72c67b7a8770d8311b32b86b4a9fa9df09ab0f7d5c4d75c72",
+    "curatedSha256": "7397d6122be7982455877117d28dde4bb1a243ece1961d76de9955a5565db923",
     "curatedSource": "catalog.toml",
     "piperSha256": "636e877eacf3c2904aa6aa8088c867bd3cd9df7f39d2023b73d0660a59249c19",
     "piperSource": "piper.json",
@@ -425,7 +425,8 @@
       "modelId": "moss-tts-nano",
       "performanceClass": "heavy",
       "platforms": [
-        "linux"
+        "linux",
+        "android"
       ],
       "providerId": "moss-local",
       "quantization": "FP32 ONNX",

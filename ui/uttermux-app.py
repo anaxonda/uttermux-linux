@@ -379,14 +379,26 @@ class SettingsPage(Gtk.Box):
         title = Gtk.Label(label="Settings", xalign=0); title.add_css_class("title-2"); self.append(title)
         self.append(Gtk.Label(label="Online providers", xalign=0, css_classes=["heading"]))
         providers_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE); providers_box.add_css_class("boxed-list")
-        self.provider_switches = {}
+        self.provider_switches = {}; self.provider_fields = {}
         for provider, title, detail in (("edge", "Microsoft Edge", "Free network voices; no API key."),
             ("elevenlabs", "ElevenLabs", "Subscription voices and Instant Voice Cloning."),
-            ("grok", "xAI / Grok", "Multilingual cloud synthesis using your xAI key.")):
+            ("grok", "xAI / Grok", "Multilingual cloud synthesis using your xAI key."),
+            ("openai", "OpenAI-compatible", "OpenAI speech API or a compatible endpoint."),
+            ("azure", "Azure Speech", "Azure neural voices using a Speech resource."),
+            ("qwen-api", "Qwen / DashScope", "Hosted Qwen multilingual voices."),
+            ("google", "Google Cloud TTS", "Direct restricted key or UtterMux-compatible proxy."),
+            ("aws", "Amazon Polly", "Direct, Cognito, or proxy authentication."),
+            ("deepgram", "Deepgram", "Aura 2 hosted voices."),
+            ("cartesia", "Cartesia", "Sonic hosted and account voices."),
+            ("playht", "PlayHT", "Hosted Play voice catalog."),
+            ("resemble", "Resemble AI", "Configured Resemble voice UUIDs."),
+            ("custom", "Custom streamed PCM", "Constrained HTTPS JSON-to-PCM endpoint.")):
             row = Gtk.Box(spacing=8); text = Gtk.Label(xalign=0, hexpand=True, wrap=True)
             text.set_markup(f"<b>{html.escape(title)}</b>\n<small>{html.escape(detail)}</small>"); row.append(text)
             if provider in {"elevenlabs", "grok"}:
                 key = Gtk.Button(label="API key…"); key.connect("clicked", self.set_key, provider, title); row.append(key)
+            elif provider != "edge":
+                configure = Gtk.Button(label="Configure…"); configure.connect("clicked", self.configure_provider, provider, title); row.append(configure)
             toggle = Gtk.Switch(valign=Gtk.Align.CENTER); toggle.connect("state-set", self.toggle_provider, provider)
             self.provider_switches[provider] = toggle; row.append(toggle); providers_box.append(row)
         self.append(providers_box)
@@ -466,6 +478,7 @@ class SettingsPage(Gtk.Box):
 
     def loaded(self, catalog, schema):
         self.loading = True
+        self.provider_fields = {item["id"]: item.get("fields", []) for item in schema.get("providers", [])}
         enabled = {item["id"]: item.get("enabled", False) for item in catalog.get("providers", [])}
         for provider, widget in self.provider_switches.items(): widget.set_active(bool(enabled.get(provider)))
         playback = schema.get("playback", {})
@@ -563,6 +576,35 @@ class SettingsPage(Gtk.Box):
                 def work():
                     result = subprocess.run(command("credential-set", provider), input=secret + "\n", text=True, capture_output=True)
                     GLib.idle_add(lambda: Gtk.AlertDialog(message=("Credential saved" if result.returncode == 0 else "Could not save credential"), detail=result.stderr.strip()).show(self.window))
+                threading.Thread(target=work, daemon=True).start()
+            dialog.destroy()
+        dialog.connect("response", response); dialog.present()
+
+    def configure_provider(self, _button, provider, title):
+        fields = self.provider_fields.get(provider, [])
+        if not fields:
+            self.window.alert("Provider metadata unavailable", "Reload Settings and try again."); return
+        dialog = Gtk.Dialog(title=f"Configure {title}", transient_for=self.window, modal=True)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Save", Gtk.ResponseType.ACCEPT)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                      margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
+        entries = {}
+        for field in fields:
+            entry = Gtk.Entry(placeholder_text=("Leave blank to keep saved value" if field.get("type") == "secret" else field.get("default", "")))
+            if field.get("type") == "secret": entry.set_visibility(False)
+            elif field.get("value"): entry.set_text(str(field["value"]))
+            label = Gtk.Label(label=field.get("label", field["id"]), xalign=0)
+            box.append(label); box.append(entry); entries[field["id"]] = (entry, field.get("type") == "secret")
+        dialog.get_content_area().append(box)
+        def response(_dialog, value):
+            if value == Gtk.ResponseType.ACCEPT:
+                payload = {name: entry.get_text() for name, (entry, secret) in entries.items()
+                           if entry.get_text() or not secret}
+                def work():
+                    process = subprocess.run(command("provider-config", provider), input=json.dumps(payload),
+                                             text=True, capture_output=True)
+                    GLib.idle_add(self.window.alert, "Could not save provider" if process.returncode else "Provider saved",
+                                  (process.stderr.strip() or process.stdout.strip()) if process.returncode else "Enable it to load its voice catalog.")
                 threading.Thread(target=work, daemon=True).start()
             dialog.destroy()
         dialog.connect("response", response); dialog.present()

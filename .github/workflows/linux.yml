@@ -25,6 +25,7 @@ jobs:
         run: |
           python scripts/catalog/build_catalog.py --piper-source catalog/sources/piper.json --check
           python scripts/release-audit.py --ci
+          bash -n install.sh scripts/install-debian scripts/install-source
       - name: Smoke-test deterministic screenshot capture
         run: |
           scripts/capture-linux-screenshots "$RUNNER_TEMP/uttermux-screenshots"

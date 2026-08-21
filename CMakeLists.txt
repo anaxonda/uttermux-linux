@@ -57,6 +57,7 @@ install(PROGRAMS scripts/install-qwen DESTINATION ${CMAKE_INSTALL_LIBDIR}/utterm
 install(PROGRAMS scripts/install-moss DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux)
 install(PROGRAMS providers/moss_server.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME moss-server)
 install(FILES python/uttermux_profiles.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux)
+install(FILES daemon/cloud_providers.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux)
 install(FILES catalog/catalog.toml catalog/v2/catalog.json
         DESTINATION ${CMAKE_INSTALL_DATADIR}/uttermux)
 install(FILES config/uttermux.conf DESTINATION ${CMAKE_INSTALL_DATADIR}/speech-dispatcher/conf/modules)

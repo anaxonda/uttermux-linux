@@ -4,23 +4,20 @@
 
 [![Linux CI](https://github.com/anaxonda/uttermux-linux/actions/workflows/linux.yml/badge.svg)](https://github.com/anaxonda/uttermux-linux/actions/workflows/linux.yml)
 
-Android system TTS engine: [`anaxonda/uttermux-android`](https://github.com/anaxonda/uttermux-android)
-
 Use local and online text-to-speech voices everywhere on Linux.
 
-UtterMux makes one voice catalog available to Firefox Reader View, Zotero Read
-Aloud, Speech Dispatcher applications, KOReader, and a desktop shortcut for
-speaking selected text. Local models stay loaded in a background broker, while
-online providers use the same voice selection and language-routing rules.
+UtterMux is a model-agnostic TTS broker behind Speech Dispatcher. It presents
+local inference engines and network services through one catalog, routing, and
+cancellation interface; a persistent background process owns model lifetime,
+provider sessions, caching, and audio streaming independently of any client.
+
+The companion [Android system TTS engine](https://github.com/anaxonda/uttermux-android)
+uses the same catalog contract and routing concepts.
 
 > **Status:** beta. Arch Linux is the development platform; Debian trixie and
 > alternate-prefix source builds run in CI. No model weights are bundled.
 
 ![UtterMux desktop voice catalog](docs/screenshots/linux-voices.png)
-
-Maintainers can reproduce all four desktop screenshots with
-`scripts/capture-linux-screenshots`. On Arch, the capture-only dependencies are
-`xorg-server-xvfb`, `xorg-xwininfo`, and `imagemagick`; synthesis is not invoked.
 
 ## Why UtterMux?
 
@@ -38,8 +35,8 @@ Firefox · Zotero · spd-say · KOReader · selection shortcut
                             │
                         uttermuxd
              ┌──────────────┼──────────────┐
-        local ONNX       free network     paid APIs
-   Piper/Kokoro/etc.        Edge        ElevenLabs/xAI
+        local inference    free network       hosted APIs
+   Piper/Kokoro/etc.          Edge       ElevenLabs/Azure/etc.
 ```
 
 The GTK application has the same four top-level areas as the Android app:
@@ -116,28 +113,40 @@ checksum, license, and synthesis path are verified together.
 
 ## Online provider support
 
-Cloud voice lists are discovered at runtime and are intentionally not frozen in
+Hosted services are adapters rather than generated model artifacts. When a
+provider exposes voice discovery, UtterMux fetches the account's current voice
+list when the broker starts; services without discovery use documented defaults
+or voice IDs configured by the user. Cloud voices are therefore not frozen into
 the generated local-model catalog.
 
 | Provider | Authentication | Linux | Android |
 | --- | --- | --- | --- |
 | Microsoft Edge Read Aloud | none | Implemented | Implemented |
-| ElevenLabs | API key | Implemented; account voices and cloning | Implemented; account voices |
-| xAI / Grok | API key | Implemented | Implemented |
-| OpenAI-compatible | API key, endpoint, model | Not implemented | Implemented |
-| Azure Speech | resource key and region/endpoint | Not implemented | Implemented |
-| Qwen / DashScope | API key, region, workspace | Local Qwen only | Implemented |
-| Google Cloud TTS | restricted API key or proxy | Not implemented | Implemented |
-| Amazon Polly | SigV4, Cognito, or proxy | Not implemented | Implemented |
-| Deepgram | API key | Not implemented | Implemented |
-| Cartesia | API key | Not implemented | Implemented |
-| PlayHT | provider credentials | Not implemented | Implemented |
-| Resemble | provider credentials | Not implemented | Implemented |
-| Custom PCM endpoint | HTTPS endpoint and bearer token | Not implemented | Implemented |
+| [ElevenLabs](https://elevenlabs.io/docs/api-reference/text-to-speech/stream) | API key | Implemented; account voices and cloning | Implemented; account voices |
+| [xAI / Grok](https://docs.x.ai/docs/guides/text-to-speech) | API key | Implemented | Implemented |
+| [OpenAI-compatible](https://platform.openai.com/docs/guides/text-to-speech) | API key, endpoint, model | Implemented | Implemented |
+| [Azure Speech](https://learn.microsoft.com/azure/ai-services/speech-service/rest-text-to-speech) | resource key and region/endpoint | Implemented; live catalog | Implemented |
+| [Qwen / DashScope](https://www.alibabacloud.com/help/en/model-studio/qwen-tts) | API key, region, workspace | Implemented; HTTP API and separate local Qwen | Implemented |
+| [Google Cloud TTS](https://cloud.google.com/text-to-speech/docs/reference/rest) | restricted API key or proxy | Implemented; live catalog | Implemented |
+| [Amazon Polly](https://docs.aws.amazon.com/polly/latest/dg/API_Reference.html) | SigV4, Cognito, or proxy | Implemented; live catalog | Implemented |
+| [Deepgram](https://developers.deepgram.com/docs/tts-rest) | API key | Implemented; Aura 2 REST | Implemented |
+| [Cartesia](https://docs.cartesia.ai/api-reference/tts/bytes) | API key | Implemented; live catalog | Implemented |
+| [PlayHT](https://docs.play.ht/reference/api-generate-tts-audio-stream) | provider credentials | Implemented; live catalog | Implemented |
+| [Resemble](https://docs.resemble.ai/api-reference/text-to-speech/stream-synthesize) | provider credentials | Implemented; configured voice UUIDs | Implemented |
+| Custom PCM endpoint | HTTPS endpoint and bearer token | Implemented | Implemented |
 
 “Implemented” means a provider adapter and voice path are present. Paid and
 account-specific services still require credentials and may not be covered by
 the project's public CI. They are never enabled as implicit fallbacks.
+
+Configure a service under **Settings → Online providers**, then enable it. The
+CLI equivalent accepts a JSON object on standard input and stores it mode 0600;
+it does not place secrets in `config.toml` or command-line arguments:
+
+```sh
+printf '%s' '{"api_key":"…","region":"eastus"}' | uttermux provider-config azure
+uttermux provider enable azure
+```
 
 MOSS-TTS-Nano uses a persistent, cancellable two-stage adapter. Generation and
 codec decoding run concurrently through bounded queues; unlike the upstream
@@ -152,7 +161,9 @@ reference laptop. The current UtterMux adapter is a CPU path; no GPU claim is
 made. Faster systems require their own benchmark before continuous-reading use.
 See [Qwen benchmark notes](docs/qwen-benchmarks.md).
 
-## Install on Arch Linux
+## Install
+
+### Arch Linux
 
 Install the latest GitHub release with its checksum-resolved Arch package:
 
@@ -161,11 +172,39 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   https://github.com/anaxonda/uttermux-linux/raw/main/install.sh | bash
 ```
 
-The script downloads the release `PKGBUILD`, rejects unresolved checksums,
+The script detects Arch or a Debian-family system. On Arch it downloads the
+release `PKGBUILD`, rejects unresolved checksums,
 builds the pinned sherpa-onnx dependency, installs through `makepkg`, runs
 `uttermux setup`, and finishes with `uttermux doctor`. Review
-[`install.sh`](install.sh) before piping it to a shell. It currently supports
-Arch Linux; the source procedure below remains the portable installation path.
+[`install.sh`](install.sh) before piping it to a shell.
+
+### Debian and Ubuntu
+
+The same one-line command installs build/runtime packages through `apt`, builds
+the pinned sherpa-onnx and UtterMux releases, runs the test suite, and installs
+under `/usr/local`:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://github.com/anaxonda/uttermux-linux/raw/main/install.sh | bash
+```
+
+Review [`scripts/install-debian`](scripts/install-debian) and
+[`scripts/install-source`](scripts/install-source) before running them.
+
+### Other distributions
+
+Install a C++17 compiler, CMake, Ninja, pkg-config, Speech Dispatcher module
+headers, Rubber Band, FFmpeg, GTK 4/PyGObject, and Python 3. Then use the generic
+release-source installer; `UTTERMUX_PREFIX` defaults to `/usr/local`:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://github.com/anaxonda/uttermux-linux/raw/main/scripts/install-source | bash
+```
+
+The generic installer verifies the published source checksum, builds the pinned
+sherpa-onnx runtime, runs tests, and invokes `sudo` only for installation.
 
 ### Build from source
 
@@ -489,6 +528,12 @@ Architecture and benchmark notes:
 - [Qwen3-TTS experiments](docs/qwen-benchmarks.md)
 - [Saved benchmark format](docs/benchmark-format.md)
 - [Gated runtime candidates](docs/runtime-candidates.md)
+
+### Maintainer screenshots
+
+`scripts/capture-linux-screenshots` renders all four GTK pages against a
+deterministic fixture. On Arch its capture-only dependencies are
+`xorg-server-xvfb`, `xorg-xwininfo`, and `imagemagick`; synthesis is not run.
 
 Related projects and design references:
 

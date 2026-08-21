@@ -38,6 +38,20 @@ TUNING_RUNTIME_REVISION = 1
 HEADER = struct.Struct("<IHHQI")
 HELLO, LIST_VOICES, VOICE, SPEAK, AUDIO_START, AUDIO, DONE, STOP, ERROR, HEALTH, STATUS, STATE = range(1, 13)
 
+CLOUD_PROVIDER_FIELDS = {
+    "openai": ("OpenAI-compatible", (("api_key", "API key", True, ""), ("endpoint", "Endpoint", False, "https://api.openai.com"), ("model", "Model", False, "gpt-4o-mini-tts"))),
+    "azure": ("Azure Speech", (("api_key", "Speech resource key", True, ""), ("region", "Region", False, "eastus"), ("endpoint", "Resource endpoint", False, ""))),
+    "qwen-api": ("Qwen / DashScope", (("api_key", "API key", True, ""), ("region", "Region", False, "singapore"), ("workspace", "Workspace ID", False, ""), ("model", "Model", False, "qwen3-tts-flash"))),
+    "google": ("Google Cloud TTS", (("auth_mode", "Authentication mode (direct/proxy)", False, "direct"), ("api_key", "Restricted API key", True, ""), ("proxy", "Proxy base URL", False, ""), ("token", "Proxy bearer token", True, ""))),
+    "aws": ("Amazon Polly", (("auth_mode", "Authentication mode (direct/cognito/proxy)", False, "direct"), ("access_key", "Access key ID", True, ""), ("secret_key", "Secret access key", True, ""), ("region", "Region", False, "us-east-1"), ("identity_pool", "Cognito identity pool ID", False, ""), ("proxy", "Proxy base URL", False, ""), ("token", "Proxy bearer token", True, ""))),
+    "deepgram": ("Deepgram", (("api_key", "API key", True, ""),)),
+    "cartesia": ("Cartesia", (("api_key", "API key", True, ""), ("model", "Model", False, "sonic-3"))),
+    "playht": ("PlayHT", (("api_key", "API key", True, ""), ("user_id", "User ID", False, ""), ("model", "Voice engine", False, "Play3.0-mini"))),
+    "resemble": ("Resemble AI", (("api_key", "API token", True, ""), ("voices", "Voice UUIDs (comma-separated)", False, ""), ("project", "Project UUID", False, ""), ("endpoint", "Streaming endpoint", False, "https://f.cluster.resemble.ai/stream"))),
+    "custom": ("Custom streamed PCM", (("endpoint", "HTTPS synthesis endpoint", False, ""), ("token", "Bearer token", True, ""), ("voices", "Voice IDs (comma-separated)", False, "default"))),
+}
+ONLINE_PROVIDERS = ("edge", "elevenlabs", "grok", *CLOUD_PROVIDER_FIELDS.keys())
+
 
 def config_dir() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "uttermux"
@@ -179,6 +193,12 @@ def render_config(doc: dict) -> str:
               f'automatic_language = {str(bool(grok.get("automatic_language", True))).lower()}']
     if grok.get("default_voice"):
         lines.append(f'default_voice = {quote(grok["default_voice"])}')
+    for provider_id in CLOUD_PROVIDER_FIELDS:
+        cfg = providers.get(provider_id, {})
+        lines += ["", f"[providers.{quote(provider_id)}]",
+                  f'enabled = {str(bool(cfg.get("enabled", False))).lower()}']
+        if cfg.get("default_voice"):
+            lines.append(f'default_voice = {quote(cfg["default_voice"])}')
     routing = doc.get("routing", {})
     lines += ["", "[routing]",
               f'auto_detect = {str(bool(routing.get("auto_detect", True))).lower()}',
@@ -359,6 +379,7 @@ def cmd_catalog(_args):
                       "moss": ("MOSS local", False, "free"),
                       "edge": ("Microsoft Edge", True, "free"),
                       "elevenlabs": ("ElevenLabs", True, "subscription"), "grok": ("xAI", True, "metered")}
+    provider_names.update({key: (title, True, "metered") for key, (title, _fields) in CLOUD_PROVIDER_FIELDS.items()})
     providers = [{"id": key, "name": values[0], "network": values[1], "cost": values[2],
                   "enabled": key in {"local", "qwen", "moss"} or bool(read_config().get("providers", {}).get(key, {}).get("enabled"))}
                  for key, values in provider_names.items()]
@@ -457,6 +478,16 @@ def cmd_settings_schema(_args):
         {"id": "grok", "name": "xAI / Grok", "fields": [
             {"id": "apiKey", "type": "secret-file", "path": str(root / "grok-key"), "required": True}]},
     ]
+    for provider_id, (name, fields) in CLOUD_PROVIDER_FIELDS.items():
+        values_path = root / f"{provider_id}.json"
+        configured = {}
+        try: configured = json.loads(values_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError): pass
+        providers.append({"id": provider_id, "name": name, "valuesFile": str(values_path),
+                          "fields": [{"id": key, "label": label, "type": "secret" if secret else "text",
+                                      "default": default, "configured": bool(configured.get(key)),
+                                      "value": "" if secret else configured.get(key, default)}
+                                     for key, label, secret, default in fields]})
     print(json.dumps({"schemaVersion": 1, "providers": providers, "playback": {
         "maxLoadedModels": {"type": "integer", "minimum": 0, "maximum": 8, "default": 0,
                             "value": int(document.get("max_loaded_models", 0))},
@@ -620,6 +651,27 @@ def cmd_credential_set(args):
     path = config_dir() / "credentials" / filenames[args.provider]
     atomic_write(path, secret + "\n")
     print(f"Stored {args.provider} credential in {path}")
+
+
+def cmd_provider_config(args):
+    if args.provider not in CLOUD_PROVIDER_FIELDS:
+        raise RuntimeError(f"unknown configurable provider: {args.provider}")
+    try: update = json.load(sys.stdin)
+    except json.JSONDecodeError as error: raise RuntimeError(f"invalid provider JSON: {error}") from None
+    if not isinstance(update, dict): raise RuntimeError("provider configuration must be a JSON object")
+    allowed = {field[0] for field in CLOUD_PROVIDER_FIELDS[args.provider][1]}
+    unknown = set(update) - allowed
+    if unknown: raise RuntimeError("unknown provider fields: " + ", ".join(sorted(unknown)))
+    path = config_dir() / "credentials" / f"{args.provider}.json"
+    current = {}
+    try: current = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError): pass
+    for key, value in update.items():
+        value = str(value).strip()
+        if value: current[key] = value
+        elif key in current: current.pop(key)
+    atomic_write(path, json.dumps(current, ensure_ascii=False, indent=2) + "\n")
+    restart(); print(f"Stored {CLOUD_PROVIDER_FIELDS[args.provider][0]} configuration in {path}")
 
 
 def cmd_eleven_clone(args):
@@ -1199,8 +1251,8 @@ def main():
     p.add_argument("model", nargs="?"); p.add_argument("values", nargs="?", default="{}"); p.set_defaults(func=cmd_model_setting)
     p = sub.add_parser("preview-url"); p.add_argument("url"); p.set_defaults(func=cmd_preview_url)
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
-    p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.set_defaults(func=cmd_provider)
-    p = sub.add_parser("provider-default"); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
+    p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=ONLINE_PROVIDERS); p.set_defaults(func=cmd_provider)
+    p = sub.add_parser("provider-default"); p.add_argument("provider", choices=ONLINE_PROVIDERS); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
     p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb",
         "local-threads", "pocket-threads", "local-silence-scale", "pocket-num-steps", "pocket-chunk-size",
         "zipvoice-num-steps", "moss-threads", "moss-batch-frames",
@@ -1212,6 +1264,7 @@ def main():
     p = sub.add_parser("edge-locales"); p.add_argument("locales", nargs="+"); p.set_defaults(func=cmd_edge_locales)
     p = sub.add_parser("elevenlabs-key"); p.add_argument("key"); p.set_defaults(func=cmd_key)
     p = sub.add_parser("credential-set"); p.add_argument("provider", choices=("elevenlabs", "grok")); p.set_defaults(func=cmd_credential_set)
+    p = sub.add_parser("provider-config"); p.add_argument("provider", choices=tuple(CLOUD_PROVIDER_FIELDS)); p.set_defaults(func=cmd_provider_config)
     p = sub.add_parser("elevenlabs-clone"); p.add_argument("--name", required=True)
     p.add_argument("--language", default="en-US"); p.add_argument("--description")
     p.add_argument("--audio", action="append", required=True); p.add_argument("--confirm-rights", action="store_true")

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+  printf '%s\n' 'Run this installer as your normal user; it invokes sudo for packages and installation.' >&2
+  exit 2
+fi
+command -v sudo >/dev/null || { printf '%s\n' 'sudo is required.' >&2; exit 2; }
+
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  ca-certificates curl git cmake ninja-build g++ pkg-config python3 python3-pip \
+  libspeechd-dev libspeechd-module0 librubberband-dev \
+  ffmpeg libgtk-4-1 python3-gi python3-numpy python3-aiohttp python3-certifi \
+  pulseaudio-utils wl-clipboard xclip
+
+exec bash < <(curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+  https://github.com/anaxonda/uttermux-linux/raw/main/scripts/install-source)
