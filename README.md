@@ -394,6 +394,7 @@ Architecture and benchmark notes:
 - [Catalog schema v2](docs/interop/catalog-v2.schema.json)
 - [Generated complete model index](docs/MODELS.generated.md)
 - [MOSS-TTS-Nano experiments](docs/moss-benchmarks.md)
+- [Kokoro runtime experiments](docs/kokoro-benchmarks.md)
 - [Pocket TTS runtime experiments](docs/pocket-benchmarks.md)
 - [Qwen3-TTS experiments](docs/qwen-benchmarks.md)
 - [Saved benchmark format](docs/benchmark-format.md)
