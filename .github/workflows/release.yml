@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: >-
-          pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf python
+          pacman -Syu --noconfirm --needed cmake ninja gcc git pkgconf python
           speech-dispatcher rubberband onnxruntime-cpu ffmpeg github-cli
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build
@@ -24,7 +24,10 @@ jobs:
       - run: python scripts/release-audit.py --ci
       - name: Create deterministic source archive
         run: |
-          git archive --format=tar --prefix="uttermux-linux-${GITHUB_REF_NAME#v}/" "$GITHUB_REF_NAME" | gzip -n > "uttermux-linux-${GITHUB_REF_NAME#v}.tar.gz"
+          archive="uttermux-linux-${GITHUB_REF_NAME#v}.tar"
+          git archive --format=tar --prefix="uttermux-linux-${GITHUB_REF_NAME#v}/" --output="$archive" "$GITHUB_REF_NAME"
+          gzip -n "$archive"
+          tar -tzf "$archive.gz" | grep -q "^uttermux-linux-${GITHUB_REF_NAME#v}/README.md$"
           sha256sum "uttermux-linux-${GITHUB_REF_NAME#v}.tar.gz" > SHA256SUMS
       - name: Resolve Arch package checksums
         run: |
