@@ -59,6 +59,23 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["audioSeconds"], 1.0)
         self.assertEqual(result["rtf"], 0.5)
 
+    def test_benchmark_record_has_machine_and_summary(self):
+        run = {"firstAudioMs": 25.0, "wallMs": 500.0, "audioSeconds": 1.0,
+               "rtf": 0.5, "sampleRate": 24000}
+        args = __import__("argparse").Namespace(voice="Test", text="Hello", language="",
+                                                runs=2, json=True, save=False, output=None)
+        record = {"id": "sherpa/test/voice", "name": "Test", "native_language": "en-US",
+                  "provider": "local", "model": "test"}
+        with mock.patch.object(ut, "voice_records", return_value=[record]), \
+             mock.patch.object(ut, "benchmark_once", return_value=run), \
+             mock.patch.object(ut, "hardware_profile", return_value={"inferenceProviders": ["CPU"]}), \
+             mock.patch("builtins.print") as output:
+            ut.cmd_benchmark(args)
+        document = __import__("json").loads(output.call_args.args[0])
+        self.assertEqual(document["schemaVersion"], 2)
+        self.assertEqual(document["summary"]["medianRtf"], 0.5)
+        self.assertTrue(document["summary"]["continuousReading"])
+
     def test_schema_two_preserves_language_routes(self):
         rendered = ut.render_config({
             "default_voice": "edge/libby", "fallback_voice": "local/lessac",
@@ -185,12 +202,16 @@ class CliTests(unittest.TestCase):
                  mock.patch.object(profiles.subprocess, "run", wraps=profiles.subprocess.run):
                 item = profiles.create_local("pocket", "My Voice", "en_US", source)
                 self.assertTrue(Path(item["referencePath"]).is_file())
+                artifact = root / "embedding.bin"; artifact.write_bytes(b"prepared embedding")
+                profiles.register_artifact(item["id"], "speaker-embedding", artifact)
                 bundle = profiles.export_profile(item["id"], root / "voice")
                 profiles.delete_profile(item["id"])
                 imported = profiles.import_profile(bundle)
                 self.assertEqual(imported["name"], "My Voice")
                 self.assertEqual(imported["language"], "en-US")
                 self.assertNotEqual(imported["id"], item["id"])
+                loaded = profiles.find_profile(imported["id"])
+                self.assertIn("speaker-embedding", loaded["artifactPaths"])
 
     def test_zipvoice_requires_exact_transcript(self):
         with self.assertRaisesRegex(ValueError, "exact transcript"):

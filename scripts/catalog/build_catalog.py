@@ -221,7 +221,7 @@ def render_markdown(document: dict[str, Any]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=ROOT / "catalog/catalog.toml")
-    parser.add_argument("--piper-source", type=Path)
+    parser.add_argument("--piper-source", type=Path, default=ROOT / "catalog/sources/piper.json")
     parser.add_argument("--platform-source", type=Path, default=ROOT / "catalog/platform-variants.toml")
     parser.add_argument("--output", type=Path, default=ROOT / "catalog/v2/catalog.json")
     parser.add_argument("--docs-output", type=Path, default=ROOT / "docs/MODELS.generated.md")

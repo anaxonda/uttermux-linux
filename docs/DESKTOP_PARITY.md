@@ -26,9 +26,11 @@ tray module.
 
 Local voice profiles can be exported as versioned `.uttermux-voice` bundles.
 The bundle is engine-specific: Pocket carries its normalized WAV, ZipVoice
-carries the WAV plus exact transcript, and future Qwen bundles carry a
-`.qvoice` artifact. Unsupported bundles may be retained by another platform,
-but they are not selectable until the matching runtime is installed.
+carries the WAV plus exact transcript, and Qwen may carry named prepared
+speaker-embedding or ICL-prompt artifacts. Profile schema 2 permits multiple
+checksummed artifacts and still imports schema-1 `artifactFile` bundles.
+Unsupported bundles may be retained by another platform, but they are not
+selectable until the matching runtime is installed.
 
 Incompatible contract changes require a new schema version. Additive optional
 fields do not. Each repository keeps a conformance fixture and validates it in

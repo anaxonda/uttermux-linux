@@ -346,6 +346,8 @@ uttermux profile-import my-reader.uttermux-voice
 
 Reference recordings are normalized to mono PCM and stored with user-only
 permissions under `~/.local/share/uttermux/voice-profiles`.
+Prepared runtime data is stored as named, checksummed schema-2 artifacts beside
+the recording. Schema-1 voice bundles remain importable.
 
 ## KOReader desktop bridge
 
@@ -391,6 +393,8 @@ Architecture and benchmark notes:
 - [Generated complete model index](docs/MODELS.generated.md)
 - [MOSS-TTS-Nano experiments](docs/moss-benchmarks.md)
 - [Qwen3-TTS experiments](docs/qwen-benchmarks.md)
+- [Saved benchmark format](docs/benchmark-format.md)
+- [Gated runtime candidates](docs/runtime-candidates.md)
 
 Related projects and design references:
 

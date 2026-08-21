@@ -11,6 +11,7 @@ import platform
 from pathlib import Path
 import shutil
 import socket
+import statistics
 import struct
 import subprocess
 import sys
@@ -39,6 +40,10 @@ HELLO, LIST_VOICES, VOICE, SPEAK, AUDIO_START, AUDIO, DONE, STOP, ERROR, HEALTH,
 
 def config_dir() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "uttermux"
+
+
+def data_root() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "uttermux"
 
 
 def config_path() -> Path:
@@ -810,13 +815,29 @@ def cmd_benchmark(args):
     language = args.language or record.get("native_language", "")
     runs = [benchmark_once(record["id"], args.text, language) for _ in range(args.runs)]
     result = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
+        "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "application": {"name": "UtterMux", "version": APP_VERSION},
         "voice": record["id"],
+        "provider": record.get("provider", ""),
+        "model": record.get("model", ""),
         "language": language,
         "characters": len(args.text),
+        "machine": hardware_profile(),
         "runs": runs,
+        "summary": {
+            "medianFirstAudioMs": round(statistics.median(run["firstAudioMs"] for run in runs), 1),
+            "medianRtf": round(statistics.median(run["rtf"] for run in runs), 3),
+            "continuousReading": statistics.median(run["rtf"] for run in runs) < 1.0,
+        },
         "note": "Run 1 includes model loading only when the broker had not already loaded it; playback is excluded.",
     }
+    if args.output or args.save:
+        output = (Path(args.output).expanduser() if args.output else
+                  data_root() / "benchmarks" /
+                  f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{record['id'].replace('/', '-')}.json")
+        atomic_write(output, json.dumps(result, ensure_ascii=False, indent=2) + "\n", 0o600)
+        result["savedTo"] = str(output)
     if args.json:
         print(json.dumps(result, indent=2))
         return
@@ -826,6 +847,7 @@ def cmd_benchmark(args):
         print(f"{index:>3}  {run['firstAudioMs']:>14.1f}  {run['wallMs']:>7.1f}  "
               f"{run['audioSeconds']:>7.3f}  {run['rtf']:>5.3f}")
     print(result["note"])
+    if result.get("savedTo"): print(f"Saved {result['savedTo']}")
 
 
 def GLib_find_program(name: str) -> str | None:
@@ -1009,7 +1031,8 @@ def main():
     p = sub.add_parser("benchmark"); p.add_argument("voice")
     p.add_argument("text", nargs="?", default="UtterMux measures synthesis latency and real time factor with this sentence.")
     p.add_argument("--language"); p.add_argument("--runs", type=int, default=3, choices=range(1, 11))
-    p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_benchmark)
+    p.add_argument("--json", action="store_true"); p.add_argument("--save", action="store_true")
+    p.add_argument("--output"); p.set_defaults(func=cmd_benchmark)
     p = sub.add_parser("preview-url"); p.add_argument("url"); p.set_defaults(func=cmd_preview_url)
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
     p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.set_defaults(func=cmd_provider)

@@ -26,8 +26,11 @@
       "id": {"type": "string"}, "name": {"type": "string"}, "language": {"type": "string"}, "engine": {"type": "string"}, "modelVersion": {"type": "string"},
       "referenceFile": {"type": "string"}, "createdAt": {"type": "integer", "minimum": 0}, "localOnly": {"const": true},
       "voiceId": {"type": "string"}, "referenceSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-      "referenceText": {"type": "string"}, "artifactFile": {"type": "string"}, "available": {"type": "boolean"},
-      "directory": {"type": "string"}, "referencePath": {"type": "string"}, "artifactPath": {"type": "string"}}, "additionalProperties": false}},
+      "referenceText": {"type": "string"}, "artifactFile": {"type": "string"},
+      "artifacts": {"type": "object", "additionalProperties": {"type": "object", "required": ["file"], "properties": {
+        "file": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "additionalProperties": false}},
+      "available": {"type": "boolean"}, "directory": {"type": "string"}, "referencePath": {"type": "string"},
+      "artifactPath": {"type": "string"}, "artifactPaths": {"type": "object", "additionalProperties": {"type": "string"}}}, "additionalProperties": false}},
     "hardware": {"type": "object", "properties": {"architecture": {"type": "string"}, "logicalCores": {"type": "integer", "minimum": 1},
       "totalRamMb": {"type": "integer", "minimum": 0}, "availableRamMb": {"type": "integer", "minimum": 0},
       "cpuFeatures": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},

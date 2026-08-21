@@ -26,8 +26,19 @@ moderate sentence produced these cold wall-clock results:
 
 Four physical-core threads are optimal. The persistent companion removes model
 startup but cannot reduce autoregressive compute below real time on this CPU.
-The runtime's current command help describes INT4 as 1.7B-only; do not interpret
-a 0.6B invocation accepting that flag as a validated 0.6B INT4 benchmark.
+The runtime's command help still describes INT4 as 1.7B-only, but source review
+shows that the 0.6B path quantizes both the Talker and Code Predictor. A second
+run used the same pinned revision, four threads, Aiden, and the CLI's default
+benchmark sentence:
+
+| Precision | Load | First audio | Audio | Generation | RTF | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| INT8 | 2.46 s | 2.37 s | 5.60 s | 12.0 s | 2.15 | 2.30 GiB |
+| INT4 | 3.52 s | 2.59 s | 5.44 s | 14.7 s | 2.70 | 1.89 GiB |
+
+INT4 reduced peak memory by about 18 percent but was about 26 percent slower.
+Precision therefore remains an explicit machine-specific choice; UtterMux must
+not automatically equate lower precision with higher speed.
 
 ## Pre-quantized GGUF runtime
 
@@ -60,7 +71,9 @@ Revisit local Qwen when at least one of these is available:
 - a runtime with a substantially smaller KV cache and faster streaming codec;
 - a smaller official Qwen TTS checkpoint.
 
-The prior Android proposal was 0.6B CustomVoice with a Q5-class talker and an
-aggressively quantized tokenizer, targeting roughly 0.7--0.9 GB of model data.
-It was never implemented. These desktop results reinforce keeping local Android
-Qwen deferred until it passes an actual sub-real-time device benchmark.
+Android currently has a gated 0.6B Base Q4_K_M device-preview variant and
+persists a prepared speaker embedding for each cloned voice. The model is not
+recommended for reader use on the reference Galaxy S10: it did not produce its
+first callback within three minutes and used about 1.5 GiB PSS. More recent,
+faster phones may run it, but each runtime/quantization pair must pass the same
+saved benchmark before its status can be promoted.
