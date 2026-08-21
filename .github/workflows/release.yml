@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Trust the checked-out runner workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: >-
           pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf python
           speech-dispatcher rubberband onnxruntime-cpu ffmpeg github-cli
