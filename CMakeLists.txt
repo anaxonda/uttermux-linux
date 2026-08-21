@@ -65,6 +65,8 @@ install(FILES assets/icons/io.uttermux.App.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 install(FILES assets/icons/io.uttermux.App-symbolic.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/symbolic/apps)
+install(FILES assets/icons/io.uttermux.Tray.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/status)
 
 if(BUILD_TESTING)
   add_executable(core_tests tests/core_tests.cpp)
