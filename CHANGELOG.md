@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Audited cloud request contracts across Linux and Android: corrected Polly
+  PCM/language handling, Azure resource paths, Cartesia authentication and
+  pagination, Qwen realtime events, provider-native rate ranges, HTTPS proxy
+  validation, and multilingual OpenAI metadata.
+- Added live ElevenLabs account discovery on Linux and a provider contract
+  reference covering credentials, formats, language, rate, and proxy behavior.
 - Added Linux adapters and secure settings for OpenAI-compatible speech,
   Azure Speech, hosted Qwen, Google Cloud TTS, Amazon Polly, Deepgram,
   Cartesia, PlayHT, Resemble, and constrained custom PCM endpoints.

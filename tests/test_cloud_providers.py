@@ -58,6 +58,8 @@ class CloudProviderTests(unittest.TestCase):
         self.assertEqual(body["SampleRate"], "16000")
         self.assertEqual(cloud.HEADER.unpack_from(emitted[0])[2], cloud.AUDIO_START)
         self.assertEqual(cloud.struct.unpack("<IB", emitted[0][cloud.HEADER.size:])[0], 16000)
+        request_body = json.loads(send.call_args.kwargs["data"])
+        self.assertNotIn("LanguageCode", request_body)
 
     def test_qwen_maps_bcp47_to_documented_language_name(self):
         provider = cloud.QwenApiProvider({"api_key": "secret"})
@@ -73,6 +75,41 @@ class CloudProviderTests(unittest.TestCase):
                                 lambda _raw: None, threading.Event(), "fr-FR")
         self.assertEqual(calls[0][1]["data"]["input"]["language_type"], "French")
         self.assertNotIn("parameters", calls[0][1]["data"])
+
+    def test_azure_resource_endpoint_uses_required_tts_prefix(self):
+        provider = cloud.AzureProvider({"endpoint": "https://demo.cognitiveservices.azure.com"})
+        self.assertEqual(provider.endpoint("voices/list"),
+                         "https://demo.cognitiveservices.azure.com/tts/cognitiveservices/voices/list")
+        regional = cloud.AzureProvider({"region": "eastus"})
+        self.assertEqual(regional.endpoint("v1"),
+                         "https://eastus.tts.speech.microsoft.com/cognitiveservices/v1")
+
+    def test_deepgram_and_playht_apply_documented_speed_ranges(self):
+        deepgram = cloud.DeepgramProvider({"api_key": "secret"}); play = cloud.PlayHtProvider({})
+        play.config.update({"api_key": "secret", "user_id": "user"})
+        with mock.patch.object(cloud, "request", return_value=(b"wav", "audio/wav")) as send, \
+             mock.patch.object(cloud, "decoded_pcm", return_value=b"\0\0"):
+            deepgram.synthesize("deepgram/aura-2-thalia-en", "Text", 3.0,
+                                lambda _raw: None, threading.Event(), "en-US")
+            self.assertIn("speed=1.5", send.call_args.args[0])
+            play.synthesize("playht/default", "Texte", 9.0,
+                            lambda _raw: None, threading.Event(), "fr-FR")
+            self.assertEqual(send.call_args.kwargs["data"]["speed"], 5)
+            self.assertEqual(send.call_args.kwargs["data"]["language"], "french")
+
+    def test_cartesia_uses_api_key_header_and_paginates(self):
+        pages = [
+            (json.dumps({"data": [{"id": "one", "name": "One", "language": "en"}],
+                         "has_more": True}).encode(), "application/json"),
+            (json.dumps({"data": [{"id": "two", "name": "Two", "language": "fr"}],
+                         "has_more": False}).encode(), "application/json"),
+        ]
+        with mock.patch.object(cloud, "request", side_effect=pages) as send:
+            provider = cloud.CartesiaProvider({"api_key": "secret"})
+        self.assertEqual(len(provider.voices()), 2)
+        self.assertEqual(send.call_args_list[0].kwargs["headers"]["X-API-Key"], "secret")
+        self.assertNotIn("Authorization", send.call_args_list[0].kwargs["headers"])
+        self.assertIn("starting_after=one", send.call_args_list[1].args[0])
 
 
 if __name__ == "__main__":

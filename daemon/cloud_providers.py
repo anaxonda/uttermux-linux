@@ -66,6 +66,27 @@ def provider_title(provider):
             "custom": "Custom"}.get(provider, provider.title())
 
 
+def language_name(tag):
+    language = str(tag or "").replace("_", "-").split("-", 1)[0].lower()
+    return {"ar": "Arabic", "bn": "Bengali", "bg": "Bulgarian", "ca": "Catalan",
+            "cs": "Czech", "da": "Danish", "de": "German", "el": "Greek",
+            "en": "English", "es": "Spanish", "fi": "Finnish", "fr": "French",
+            "he": "Hebrew", "hi": "Hindi", "hr": "Croatian", "hu": "Hungarian",
+            "id": "Indonesian", "it": "Italian", "ja": "Japanese", "ko": "Korean",
+            "ms": "Malay", "nl": "Dutch", "no": "Norwegian", "nb": "Norwegian",
+            "pl": "Polish", "pt": "Portuguese", "ro": "Romanian", "ru": "Russian",
+            "sk": "Slovak", "sv": "Swedish", "ta": "Tamil", "te": "Telugu",
+            "th": "Thai", "tr": "Turkish", "uk": "Ukrainian", "vi": "Vietnamese",
+            "zh": "Chinese"}.get(language, "Auto")
+
+
+def require_https(value, label):
+    parsed = urllib.parse.urlsplit(str(value).strip())
+    if parsed.scheme.lower() != "https" or not parsed.netloc:
+        raise RuntimeError(f"{label} must be an HTTPS URL")
+    return str(value).strip().rstrip("/")
+
+
 class Provider:
     id = ""
     model = ""
@@ -110,12 +131,17 @@ class Provider:
 class OpenAiProvider(Provider):
     id, model = "openai", "gpt-4o-mini-tts"
     defaults = tuple(voice(name, name.title(), "en-US", "openai", "gpt-4o-mini-tts",
-                           ("en", "fr", "de", "es", "it", "pt", "ja", "ko", "zh"))
+                           ("af", "ar", "hy", "az", "be", "bs", "bg", "ca", "zh", "hr", "cs",
+                            "da", "nl", "en", "et", "fi", "fr", "gl", "de", "el", "he", "hi",
+                            "hu", "is", "id", "it", "ja", "kn", "kk", "ko", "lv", "lt", "mk",
+                            "ms", "mr", "mi", "ne", "no", "fa", "pl", "pt", "ro", "ru", "sr",
+                            "sk", "sl", "es", "sw", "sv", "tl", "ta", "th", "tr", "uk", "ur",
+                            "vi", "cy"))
                      for name in ("alloy", "ash", "ballad", "coral", "echo", "fable",
-                                  "nova", "onyx", "sage", "shimmer", "verse"))
+                                  "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar"))
 
     def synthesize(self, voice_id, text, speed, emit, cancelled, language=""):
-        endpoint = self.value("endpoint", "https://api.openai.com").rstrip("/")
+        endpoint = require_https(self.value("endpoint", "https://api.openai.com"), "OpenAI endpoint")
         body = {"model": self.value("model", self.model), "voice": self.external(voice_id),
                 "input": text, "response_format": "pcm", "speed": max(.25, min(4, speed))}
         data, _ = request(endpoint + "/v1/audio/speech", data=body,
@@ -129,13 +155,16 @@ class AzureProvider(Provider):
     defaults = (voice("en-US-JennyNeural@en-US", "Jenny", "en-US", id, model),
                 voice("fr-FR-DeniseNeural@fr-FR", "Denise", "fr-FR", id, model))
 
-    def base(self):
-        return self.value("endpoint") or f"https://{self.require('region')}.tts.speech.microsoft.com"
+    def endpoint(self, path):
+        resource = self.value("endpoint")
+        if resource:
+            return require_https(resource, "Azure resource endpoint") + "/tts/cognitiveservices/" + path
+        return f"https://{self.value('region', 'eastus')}.tts.speech.microsoft.com/cognitiveservices/{path}"
 
     def refresh(self):
-        if not self.value("api_key") or not self.value("region"):
+        if not self.value("api_key"):
             return
-        data, _ = request(self.base().rstrip("/") + "/cognitiveservices/voices/list",
+        data, _ = request(self.endpoint("voices/list"),
                           headers={"Ocp-Apim-Subscription-Key": self.value("api_key")})
         found = []
         for item in json.loads(data):
@@ -151,7 +180,7 @@ class AzureProvider(Provider):
         ssml = (f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
                 f"xml:lang='{html.escape(language or 'en-US')}'><voice name='{html.escape(name)}'>"
                 f"<prosody rate='{rate:+d}%'>{html.escape(text)}</prosody></voice></speak>").encode()
-        data, _ = request(self.base().rstrip("/") + "/cognitiveservices/v1", data=ssml, method="POST",
+        data, _ = request(self.endpoint("v1"), data=ssml, method="POST",
                           headers={"Ocp-Apim-Subscription-Key": self.require("api_key"),
                                    "Content-Type": "application/ssml+xml",
                                    "X-Microsoft-OutputFormat": "raw-24khz-16bit-mono-pcm",
@@ -166,7 +195,7 @@ class GoogleProvider(Provider):
 
     def endpoint(self, path):
         if self.value("auth_mode", "direct") == "proxy":
-            return self.require("proxy").rstrip("/") + path, self.proxy_headers()
+            return require_https(self.require("proxy"), "Google proxy") + path, self.proxy_headers()
         key = urllib.parse.quote(self.require("api_key"), safe="")
         separator = "&" if "?" in path else "?"
         return "https://texttospeech.googleapis.com" + path + separator + "key=" + key, {}
@@ -264,7 +293,7 @@ class AwsProvider(Provider):
     def refresh(self):
         try:
             if self.mode() == "proxy":
-                data, _ = request(self.require("proxy").rstrip("/") + "/v1/voices", headers=self.proxy_headers())
+                data, _ = request(require_https(self.require("proxy"), "AWS proxy") + "/v1/voices", headers=self.proxy_headers())
                 items = json.loads(data)
                 self._voices = [voice(f"{item['id']}/{item.get('model','neural')}@{item.get('language','en-US')}",
                                 item["id"], item.get("language", "en-US"), self.id, "Polly") for item in items]
@@ -291,13 +320,18 @@ class AwsProvider(Provider):
         external = voice_id.removeprefix("aws/").split("@", 1)[0]
         name, engine = external.split("/", 1)
         if self.mode() == "proxy":
-            data, _ = request(self.require("proxy").rstrip("/") + "/v1/synthesize",
+            data, _ = request(require_https(self.require("proxy"), "AWS proxy") + "/v1/synthesize",
                               data={"text": text, "voice": name, "model": engine,
                                     "language": language, "speed": speed}, headers=self.proxy_headers())
             self.emit(data, emit, cancelled); return
-        body = json.dumps({"Text": text, "TextType": "text", "OutputFormat": "pcm",
-                           "SampleRate": "16000", "VoiceId": name, "Engine": engine,
-                           "LanguageCode": language or "en-US"}, separators=(",", ":")).encode()
+        # LanguageCode is only needed for Polly's bilingual voices. Supplying a
+        # routed BCP-47 tag to an ordinary voice can make an otherwise valid
+        # request fail. The selected catalog voice already fixes its language.
+        values = {"Text": text, "TextType": "text", "OutputFormat": "pcm",
+                  "SampleRate": "16000", "VoiceId": name, "Engine": engine}
+        if name == "Aditi" and (language or "").lower().startswith("hi"):
+            values["LanguageCode"] = "hi-IN"
+        body = json.dumps(values, separators=(",", ":")).encode()
         url = f"https://polly.{self.region()}.amazonaws.com/v1/speech"
         data, _ = request(url, data=body, method="POST", headers=self.signed("POST", url, body))
         self.emit(data, emit, cancelled, sample_rate=16000)
@@ -310,7 +344,8 @@ class DeepgramProvider(Provider):
 
     def synthesize(self, voice_id, text, speed, emit, cancelled, language=""):
         query = urllib.parse.urlencode({"model": self.external(voice_id), "encoding": "linear16",
-                                        "sample_rate": 24000, "container": "wav"})
+                                        "sample_rate": 24000, "container": "wav",
+                                        "speed": max(.7, min(1.5, speed))})
         data, _ = request("https://api.deepgram.com/v1/speak?" + query, data={"text": text},
                           headers={"Authorization": "Token " + self.require("api_key")})
         self.emit(data, emit, cancelled, encoded=True)
@@ -323,19 +358,27 @@ class CartesiaProvider(Provider):
     headers_version = "2026-03-01"
 
     def headers(self):
-        return {"Authorization": "Bearer " + self.require("api_key"),
+        return {"X-API-Key": self.require("api_key"),
                 "Cartesia-Version": self.headers_version}
 
     def refresh(self):
         if not self.value("api_key"):
             return
-        data, _ = request("https://api.cartesia.ai/voices?limit=100", headers=self.headers())
-        root = json.loads(data); found = []
-        for item in root.get("data", root if isinstance(root, list) else []):
-            identifier = item.get("id", ""); locale = item.get("language", "en")
-            if identifier and (item.get("is_public", True) or item.get("is_owner")):
-                found.append(voice(f"{identifier}@{locale}", item.get("name", "Voice"), locale,
-                                   self.id, self.model, (locale,)))
+        found, cursor = [], ""
+        while True:
+            query = {"limit": 100, "expand[]": "preview_file_url"}
+            if cursor: query["starting_after"] = cursor
+            data, _ = request("https://api.cartesia.ai/voices?" + urllib.parse.urlencode(query),
+                              headers=self.headers())
+            root = json.loads(data); items = root.get("data", root if isinstance(root, list) else [])
+            for item in items:
+                identifier = item.get("id", ""); locale = item.get("language", "en")
+                if identifier and (item.get("is_public", True) or item.get("is_owner")):
+                    found.append(voice(f"{identifier}@{locale}", item.get("name", "Voice"), locale,
+                                       self.id, self.model, (locale,)))
+            if not isinstance(root, dict) or not root.get("has_more") or not items: break
+            cursor = items[-1].get("id", "")
+            if not cursor: break
         if found:
             self._voices = found
 
@@ -373,7 +416,8 @@ class PlayHtProvider(Provider):
     def synthesize(self, voice_id, text, speed, emit, cancelled, language=""):
         body = {"text": text, "voice": urllib.parse.unquote(self.external(voice_id)),
                 "voice_engine": self.value("model", self.model), "output_format": "wav",
-                "sample_rate": 24000, "speed": speed}
+                "sample_rate": 24000, "speed": max(.1, min(5, speed)),
+                "language": language_name(language).lower()}
         data, _ = request("https://api.play.ht/api/v2/tts/stream", data=body,
                           headers={**self.headers(), "Accept": "audio/wav"})
         self.emit(data, emit, cancelled, encoded=True)
@@ -393,7 +437,9 @@ class ResembleProvider(Provider):
                 "sample_rate": 24000}
         if self.value("project"):
             body["project_uuid"] = self.value("project")
-        data, _ = request(self.value("endpoint", "https://f.cluster.resemble.ai/stream"), data=body,
+        endpoint = require_https(self.value("endpoint", "https://f.cluster.resemble.ai/stream"),
+                                 "Resemble endpoint")
+        data, _ = request(endpoint, data=body,
                           headers={"Authorization": "Bearer " + self.require("api_key")})
         self.emit(data, emit, cancelled, encoded=True)
 
@@ -408,9 +454,7 @@ class CustomProvider(Provider):
         super().__init__(config)
 
     def synthesize(self, voice_id, text, speed, emit, cancelled, language=""):
-        endpoint = self.require("endpoint")
-        if urllib.parse.urlsplit(endpoint).scheme != "https":
-            raise RuntimeError("Custom PCM endpoint must use HTTPS")
+        endpoint = require_https(self.require("endpoint"), "Custom PCM endpoint")
         headers = {"Accept": "audio/pcm"}
         if self.value("token"):
             headers["Authorization"] = "Bearer " + self.value("token")
@@ -429,12 +473,9 @@ class QwenApiProvider(Provider):
     def synthesize(self, voice_id, text, speed, emit, cancelled, language=""):
         region = self.value("region", "singapore").lower()
         base = "https://dashscope.aliyuncs.com" if region == "beijing" else "https://dashscope-intl.aliyuncs.com"
-        language_name = {"zh": "Chinese", "en": "English", "de": "German", "it": "Italian",
-                         "pt": "Portuguese", "es": "Spanish", "ja": "Japanese", "ko": "Korean",
-                         "fr": "French", "ru": "Russian"}.get((language or "").split("-", 1)[0], "Auto")
         body = {"model": self.value("model", self.model),
                 "input": {"text": text, "voice": self.external(voice_id),
-                          "language_type": language_name}}
+                          "language_type": language_name(language)}}
         headers = {"Authorization": "Bearer " + self.require("api_key"),
                    "X-DashScope-Async": "disable"}
         if self.value("workspace"):

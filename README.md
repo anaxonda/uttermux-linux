@@ -139,6 +139,10 @@ the generated local-model catalog.
 account-specific services still require credentials and may not be covered by
 the project's public CI. They are never enabled as implicit fallbacks.
 
+Exact endpoint paths, authentication headers, language fields, audio formats,
+rate ranges, proxy behavior, and credential guidance are documented in
+[Cloud provider contracts](docs/cloud-providers.md).
+
 Configure a service under **Settings → Online providers**, then enable it. The
 CLI equivalent accepts a JSON object on standard input and stores it mode 0600;
 it does not place secrets in `config.toml` or command-line arguments:
