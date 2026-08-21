@@ -12,6 +12,26 @@ import threading
 import types
 
 
+def streaming_runtime_class(base):
+    """Return an upstream runtime limited to the fixed-sample streaming graph set."""
+    class StreamingOnnxTtsRuntime(base):
+        def _create_sessions(self):
+            tts_dir = self.tts_meta_path.parent
+            codec_dir = self.codec_meta_path.parent
+            fixed_frame = self.tts_meta["files"].get("local_fixed_sampled_frame")
+            if not fixed_frame:
+                raise RuntimeError("MOSS fixed-sampling graph is missing")
+            return {
+                "prefill": self._session(tts_dir / self.tts_meta["files"]["prefill"]),
+                "decode": self._session(tts_dir / self.tts_meta["files"]["decode_step"]),
+                "local_fixed_sampled_frame": self._session(tts_dir / fixed_frame),
+                "codec_decode_step": self._session(
+                    codec_dir / self.codec_meta["files"]["decode_step"]),
+            }
+
+    return StreamingOnnxTtsRuntime
+
+
 def load_runtime(source: str, models: str, threads: int):
     # Upstream imports PyTorch solely for custom reference-audio loading.  The
     # built-in prompt-code voices need only NumPy, SentencePiece and ORT.
@@ -20,8 +40,9 @@ def load_runtime(source: str, models: str, threads: int):
     sys.modules.setdefault("torch", torch); sys.modules.setdefault("torchaudio", torchaudio)
     sys.path.insert(0, source)
     from onnx_tts_runtime import OnnxTtsRuntime
-    return OnnxTtsRuntime(model_dir=models, thread_count=threads,
-                          sample_mode="fixed", do_sample=True)
+    runtime = streaming_runtime_class(OnnxTtsRuntime)
+    return runtime(model_dir=models, thread_count=threads,
+                   sample_mode="fixed", do_sample=True)
 
 
 class MossService:

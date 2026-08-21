@@ -706,7 +706,9 @@ class MossProvider:
         data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "uttermux"
         root = Path(config.get("root", data / "runtimes/moss-tts-nano"))
         self.python = Path(config.get("python", root / "venv/bin/python"))
-        self.server = Path(config.get("server", root / "moss_server.py"))
+        packaged_server = Path(__file__).resolve().parent / "moss-server"
+        default_server = packaged_server if packaged_server.is_file() else root / "moss_server.py"
+        self.server = Path(config.get("server", default_server))
         self.source = Path(config.get("source", root / "source"))
         self.models = Path(config.get("model_dir", data / "models/moss-tts-nano"))
         required = (self.python, self.server, self.source / "onnx_tts_runtime.py",

@@ -13,6 +13,17 @@ path.
 - built-in presets: 18
 - voice cloning: supported by the upstream model
 
+UtterMux's fixed-sampling streaming companion loads only the four graphs used
+by that path: prefill, autoregressive decode, the fixed-frame sampler, and the
+streaming codec decoder. The upstream runtime otherwise creates five unused
+sessions for codec encoding, full decoding, and alternate sampling paths.
+
+With the reduced graph set, a load-only run reached its health endpoint in
+5.23 seconds at 946 MiB RSS. One short synthesis peaked at 1.22 GiB RSS and
+generated 4.16 seconds of audio in 4.30 seconds (RTF 1.03). This validates the
+lower-footprint path; it does not establish a throughput improvement because
+sampled output length and short-run timing vary.
+
 The ONNX runtime still imports PyTorch and torchaudio for reference-audio
 loading, although built-in-preset inference itself only needs ONNX Runtime,
 NumPy, SentencePiece, and the model assets. A production UtterMux adapter
@@ -78,3 +89,8 @@ loading, four-frame codec batches, and no artificial inter-chunk silence. The
 model is fast enough on the reference CPU when its stages overlap. Continuous
 KOReader/Librera/Firefox testing is still required before recommending it as a
 default, particularly to detect audible seams at internal 75-token boundaries.
+
+There is currently no official INT8 or static-KV-cache ONNX artifact. Further
+large throughput gains likely require a new validated export or an inference
+runtime that avoids copying the growing autoregressive cache, rather than a
+larger playback buffer.
