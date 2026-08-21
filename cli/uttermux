@@ -127,15 +127,15 @@ def quote(value) -> str:
 
 
 def render_config(doc: dict) -> str:
-    lines = ["schema_version = 2", f'max_loaded_models = {int(doc.get("max_loaded_models", 2))}',
+    lines = ["schema_version = 2", f'max_loaded_models = {int(doc.get("max_loaded_models", 0))}',
              f'audio_cache_mb = {int(doc.get("audio_cache_mb", 64))}',
-             f'local_threads = {int(doc.get("local_threads", 4))}',
-             f'pocket_threads = {int(doc.get("pocket_threads", 2))}',
+             f'local_threads = {int(doc.get("local_threads", 0))}',
+             f'pocket_threads = {int(doc.get("pocket_threads", 0))}',
              f'local_silence_scale = {float(doc.get("local_silence_scale", .2))}',
              f'pocket_num_steps = {int(doc.get("pocket_num_steps", 3))}',
              f'pocket_chunk_size = {int(doc.get("pocket_chunk_size", 4))}',
              f'zipvoice_num_steps = {int(doc.get("zipvoice_num_steps", 4))}',
-             f'moss_threads = {int(doc.get("moss_threads", 2))}',
+             f'moss_threads = {int(doc.get("moss_threads", 0))}',
              f'moss_batch_frames = {int(doc.get("moss_batch_frames", 4))}',
              f'external_idle_seconds = {int(doc.get("external_idle_seconds", 120))}',
              f'preload_default_voice = {str(bool(doc.get("preload_default_voice", False))).lower()}']
@@ -186,14 +186,14 @@ def restart() -> None:
 
 def setup(_args):
     doc = read_config()
-    doc.setdefault("max_loaded_models", 2)
-    doc.setdefault("local_threads", 4)
-    doc.setdefault("pocket_threads", 2)
+    doc.setdefault("max_loaded_models", 0)
+    doc.setdefault("local_threads", 0)
+    doc.setdefault("pocket_threads", 0)
     doc.setdefault("local_silence_scale", .2)
     doc.setdefault("pocket_num_steps", 3)
     doc.setdefault("pocket_chunk_size", 4)
     doc.setdefault("zipvoice_num_steps", 4)
-    doc.setdefault("moss_threads", 2); doc.setdefault("moss_batch_frames", 4)
+    doc.setdefault("moss_threads", 0); doc.setdefault("moss_batch_frames", 4)
     doc.setdefault("external_idle_seconds", 120)
     doc.setdefault("preload_default_voice", False)
     doc.setdefault("fallback_voice", "sherpa/vits-piper-en_US-lessac-medium/lessac")
@@ -443,14 +443,14 @@ def cmd_settings_schema(_args):
             {"id": "apiKey", "type": "secret-file", "path": str(root / "grok-key"), "required": True}]},
     ]
     print(json.dumps({"schemaVersion": 1, "providers": providers, "playback": {
-        "maxLoadedModels": {"type": "integer", "minimum": 1, "maximum": 8, "default": 2,
-                            "value": int(document.get("max_loaded_models", 2))},
+        "maxLoadedModels": {"type": "integer", "minimum": 0, "maximum": 8, "default": 0,
+                            "value": int(document.get("max_loaded_models", 0))},
         "audioCacheMb": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64,
                          "value": int(document.get("audio_cache_mb", 64))},
-        "localThreads": {"type": "integer", "minimum": 1, "maximum": 16, "default": 4,
-                         "value": int(document.get("local_threads", 4))},
-        "pocketThreads": {"type": "integer", "minimum": 1, "maximum": 16, "default": 2,
-                          "value": int(document.get("pocket_threads", 2))},
+        "localThreads": {"type": "integer", "minimum": 0, "maximum": 16, "default": 0,
+                         "value": int(document.get("local_threads", 0))},
+        "pocketThreads": {"type": "integer", "minimum": 0, "maximum": 16, "default": 0,
+                          "value": int(document.get("pocket_threads", 0))},
         "localSilenceScale": {"type": "number", "minimum": 0, "maximum": 2, "default": .2,
                               "value": float(document.get("local_silence_scale", .2))},
         "pocketNumSteps": {"type": "integer", "minimum": 1, "maximum": 8, "default": 3,
@@ -459,8 +459,8 @@ def cmd_settings_schema(_args):
                             "value": int(document.get("pocket_chunk_size", 4))},
         "zipvoiceNumSteps": {"type": "integer", "minimum": 1, "maximum": 8, "default": 4,
                              "value": int(document.get("zipvoice_num_steps", 4))},
-        "mossThreads": {"type": "integer", "minimum": 1, "maximum": 8, "default": 2,
-                        "value": int(document.get("moss_threads", 2))},
+        "mossThreads": {"type": "integer", "minimum": 0, "maximum": 8, "default": 0,
+                        "value": int(document.get("moss_threads", 0))},
         "mossBatchFrames": {"type": "integer", "minimum": 1, "maximum": 16, "default": 4,
                             "value": int(document.get("moss_batch_frames", 4))},
         "externalIdleSeconds": {"type": "integer", "minimum": 0, "maximum": 3600, "default": 120,
@@ -672,13 +672,13 @@ def cmd_provider_default(args):
 def cmd_setting(args):
     doc = read_config()
     if args.name == "max-loaded-models":
-        doc["max_loaded_models"] = max(1, min(8, int(args.value)))
+        doc["max_loaded_models"] = max(0, min(8, int(args.value)))
     elif args.name == "audio-cache-mb":
         doc["audio_cache_mb"] = max(0, min(1024, int(args.value)))
     elif args.name == "local-threads":
-        doc["local_threads"] = max(1, min(16, int(args.value)))
+        doc["local_threads"] = max(0, min(16, 0 if args.value.casefold() == "auto" else int(args.value)))
     elif args.name == "pocket-threads":
-        doc["pocket_threads"] = max(1, min(16, int(args.value)))
+        doc["pocket_threads"] = max(0, min(16, 0 if args.value.casefold() == "auto" else int(args.value)))
     elif args.name == "local-silence-scale":
         doc["local_silence_scale"] = max(0.0, min(2.0, float(args.value)))
     elif args.name == "pocket-num-steps":
@@ -688,7 +688,7 @@ def cmd_setting(args):
     elif args.name == "zipvoice-num-steps":
         doc["zipvoice_num_steps"] = max(1, min(8, int(args.value)))
     elif args.name == "moss-threads":
-        doc["moss_threads"] = max(1, min(8, int(args.value)))
+        doc["moss_threads"] = max(0, min(8, 0 if args.value.casefold() == "auto" else int(args.value)))
     elif args.name == "moss-batch-frames":
         doc["moss_batch_frames"] = max(1, min(16, int(args.value)))
     elif args.name == "external-idle-seconds":
@@ -1008,8 +1008,8 @@ def diagnostic_report() -> dict:
         runtime = {"status": "unavailable"}
     return {"schemaVersion": 1, "uttermuxVersion": APP_VERSION,
             "hardware": hardware_profile(), "runtime": runtime, "services": services,
-            "settings": {"maxLoadedModels": document.get("max_loaded_models", 2),
-                         "localThreads": document.get("local_threads", 4),
+            "settings": {"maxLoadedModels": document.get("max_loaded_models", 0),
+                         "localThreads": document.get("local_threads", 0),
                          "localSilenceScale": document.get("local_silence_scale", .2),
                          "routing": document.get("routing", {}), "providers": providers},
             "models": models,

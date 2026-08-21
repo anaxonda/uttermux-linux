@@ -210,21 +210,28 @@ the first sentence.
 
 Advanced performance controls are available in both Settings and the CLI:
 
-| Setting | Recommended | Effect |
+| Setting | Fresh default | Effect |
 | --- | ---: | --- |
-| `local-threads` | 4 | ONNX threads per local sherpa model; excessive threads can be slower |
-| `pocket-threads` | 2 | Pocket-specific ONNX threads; measured separately from Kokoro |
+| `local-threads` | Automatic | Uses up to 4 CPU threads per local sherpa model |
+| `pocket-threads` | Automatic | Uses up to 2 CPU threads; Pocket can regress with excess parallelism |
 | `local-silence-scale` | 0.2 | Scales pauses generated inside one local utterance |
 | `pocket-num-steps` | 3 | Pocket quality/latency tradeoff |
 | `pocket-chunk-size` | 4 | Pocket continuity/responsiveness tradeoff |
 | `zipvoice-num-steps` | 4 | ZipVoice quality/latency tradeoff |
-| `moss-threads` | 2 | Threads for each concurrent MOSS ONNX stage |
+| `moss-threads` | Automatic | Uses up to 2 threads for each concurrent MOSS ONNX stage |
 | `moss-batch-frames` | 4 | MOSS first-audio latency versus decode throughput |
 | `external-idle-seconds` | 120 | Releases Qwen/MOSS process memory after inactivity; zero keeps it resident |
-| `max-loaded-models` | 2 | Warm-model count versus RAM use |
+| `max-loaded-models` | Automatic | Keeps one model below 8 GiB total RAM, otherwise two |
 
-For example, `uttermux setting local-threads 2` applies the new value and
-reloads the broker. The GUI batches all advanced changes and reloads only once.
+Zero means Automatic in the config and GUI; the CLI also accepts `auto` for
+thread settings. For example, `uttermux setting local-threads 2` applies a
+device-specific override, while `uttermux setting local-threads auto` restores
+automatic selection. Both reload the broker. The automatic policy is a safe
+starting point based on engine behavior and available cores/RAM, not an attempt
+to predict the fastest setting for every processor. Benchmark documents report
+the exact reference hardware and should not be read as universal tuning advice.
+
+The GUI batches all advanced changes and reloads only once.
 MOSS has independent settings because increasing the normal sherpa thread count
 does not tune its concurrent generator/decoder pipeline.
 

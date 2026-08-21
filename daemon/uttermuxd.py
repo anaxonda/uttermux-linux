@@ -56,6 +56,23 @@ GROK_LANGUAGES = (
 LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
 
+def automatic_threads(engine: str, logical_cores: int | None = None) -> int:
+    """Return a conservative portable default; explicit config overrides it."""
+    cores = max(1, int(logical_cores or os.cpu_count() or 1))
+    cap = 2 if engine in {"pocket", "moss"} else 4
+    return min(cores, cap)
+
+
+def automatic_model_cache(total_memory_bytes: int | None = None) -> int:
+    """Keep one model on constrained systems and two on larger desktops."""
+    if total_memory_bytes is None:
+        try:
+            total_memory_bytes = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+        except (AttributeError, OSError, ValueError):
+            total_memory_bytes = 0
+    return 1 if not total_memory_bytes or total_memory_bytes < 8 * 1024 ** 3 else 2
+
+
 def normalize_synthesis_text(text: str) -> str:
     """Remove ebook artifacts without changing spoken word order or offsets."""
     cleaned = text.replace("\u00ad", "").replace("\u200b", "").replace("\ufeff", "")
@@ -564,7 +581,8 @@ class QwenProvider:
         if not (self.model / "model.safetensors").is_file():
             raise RuntimeError(f"Qwen model is not installed: {self.model}")
         self.port = int(config.get("port", 17872))
-        self.threads = max(1, int(config.get("threads", 4)))
+        configured_threads = int(config.get("threads", 0))
+        self.threads = configured_threads if configured_threads > 0 else automatic_threads("qwen")
         self.quantization = str(config.get("quantization", "int8"))
         self.idle_seconds = max(0, int(config.get("idle_seconds", 120)))
         self.idle_generation = 0
@@ -802,7 +820,8 @@ class Broker:
         self.models, self.voices, self.voice_meta = self._load_models(), {}, {}
         self.engines: OrderedDict[str, SherpaEngine] = OrderedDict()
         self.engine_lock = threading.Lock()
-        self.max_loaded_models = max(1, int(self.config.get("max_loaded_models", 2)))
+        configured_cache = int(self.config.get("max_loaded_models", 0))
+        self.max_loaded_models = configured_cache or automatic_model_cache()
         self.online_voices, self.online_providers = {}, {}
         self.audio_cache: OrderedDict[tuple[str, str, str, float], list[bytes]] = OrderedDict()
         self.audio_cache_bytes = 0
@@ -849,7 +868,8 @@ class Broker:
             cfg = provider_config.get(provider_name, {})
             if provider_name == "moss":
                 cfg = dict(cfg)
-                cfg.setdefault("threads", self.config.get("moss_threads", 2))
+                configured_threads = int(self.config.get("moss_threads", 0))
+                cfg.setdefault("threads", configured_threads or automatic_threads("moss"))
                 cfg.setdefault("batch_frames", self.config.get("moss_batch_frames", 4))
             if provider_name in {"qwen", "moss"}:
                 cfg = dict(cfg)
@@ -891,8 +911,9 @@ class Broker:
                 engine.lock.acquire()
                 return engine
             effective_model = dict(model)
-            default_threads = self.config.get("pocket_threads", 2) if model.get("engine") == "pocket" else self.config.get("local_threads", model.get("num_threads", 4))
-            effective_model["num_threads"] = int(default_threads)
+            setting = "pocket_threads" if model.get("engine") == "pocket" else "local_threads"
+            configured_threads = int(self.config.get(setting, 0))
+            effective_model["num_threads"] = configured_threads or automatic_threads(model.get("engine", ""))
             effective_model["silence_scale"] = float(self.config.get("local_silence_scale", .2))
             effective_model["pocket_num_steps"] = int(self.config.get("pocket_num_steps", 3))
             effective_model["pocket_chunk_size"] = int(self.config.get("pocket_chunk_size", 4))

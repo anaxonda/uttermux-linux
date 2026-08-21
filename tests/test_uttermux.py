@@ -35,6 +35,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((kind, request), (self.u.SYNTHESIZE, 19))
         self.assertEqual(self.u.split_fields(payload), ["voice", "1", "hello", "fr-FR"])
 
+    def test_automatic_tuning_is_engine_and_hardware_bounded(self):
+        self.assertEqual(self.u.automatic_threads("kokoro", 1), 1)
+        self.assertEqual(self.u.automatic_threads("kokoro", 32), 4)
+        self.assertEqual(self.u.automatic_threads("pocket", 32), 2)
+        self.assertEqual(self.u.automatic_threads("moss", 1), 1)
+        self.assertEqual(self.u.automatic_model_cache(4 * 1024 ** 3), 1)
+        self.assertEqual(self.u.automatic_model_cache(16 * 1024 ** 3), 2)
+
     def test_kokoro_long_text_is_split_without_overlap_or_tm_symbol(self):
         text = (("First sentence is deliberately long enough to form a useful group. " * 4) +
                 "Second paragraph™ ends here. Final sentence remains present.")
