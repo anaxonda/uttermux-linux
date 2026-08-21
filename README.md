@@ -165,6 +165,10 @@ Clone or download this repository first, then run the commands from its root.
 socket-activated broker and tray user services. Existing model paths are
 migrated without deleting the old configuration.
 
+After upgrading from a user-local prototype, check `type -a uttermux`. An old
+`~/.local/bin/uttermux` can precede the packaged executable in `PATH`; rename or
+remove that obsolete copy before running `uttermux setup`.
+
 Run a health check:
 
 ```sh
