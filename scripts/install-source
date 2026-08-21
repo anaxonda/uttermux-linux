@@ -4,6 +4,8 @@ set -euo pipefail
 repo=https://github.com/anaxonda/uttermux-linux
 sherpa_version=1.13.6
 prefix=${UTTERMUX_PREFIX:-/usr/local}
+build_jobs=${UTTERMUX_BUILD_JOBS:-2}
+[[ $build_jobs =~ ^[1-9][0-9]*$ ]] || { printf '%s\n' 'UTTERMUX_BUILD_JOBS must be a positive integer.' >&2; exit 2; }
 
 if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
   printf '%s\n' 'Run this installer as your normal user; it invokes sudo only for installation.' >&2
@@ -45,6 +47,13 @@ curl --proto '=https' --tlsv1.2 -fL \
   "https://github.com/k2-fsa/sherpa-onnx/archive/refs/tags/v$sherpa_version.tar.gz" \
   -o "$work/sherpa.tar.gz"
 tar -xzf "$work/sherpa.tar.gz" -C "$work"
+# GCC 16 rejects sherpa-onnx 1.13.6's bundled eSpeak -Wno-format override when
+# a distribution enables -Werror=format-security. Preserve the distribution's
+# format hardening by removing only that upstream override.
+sed -i '/^[[:space:]]*-Wno-format$/d' \
+  "$work/sherpa-onnx-$sherpa_version/cmake/espeak-ng-for-piper.cmake"
+! grep -Eq '^[[:space:]]*-Wno-format$' \
+  "$work/sherpa-onnx-$sherpa_version/cmake/espeak-ng-for-piper.cmake"
 cmake -S "$work/sherpa-onnx-$sherpa_version" -B "$work/sherpa-build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" -DBUILD_SHARED_LIBS=ON \
   -DSHERPA_ONNX_ENABLE_TTS=ON -DSHERPA_ONNX_ENABLE_C_API=ON \
@@ -53,11 +62,11 @@ cmake -S "$work/sherpa-onnx-$sherpa_version" -B "$work/sherpa-build" -G Ninja \
   -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF \
   -DSHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION=OFF \
   -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=OFF
-cmake --build "$work/sherpa-build"
+cmake --build "$work/sherpa-build" --parallel "$build_jobs"
 
 cmake -S "$source_root" -B "$work/build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix"
-cmake --build "$work/build"
+cmake --build "$work/build" --parallel "$build_jobs"
 ctest --test-dir "$work/build" --output-on-failure
 sudo cmake --install "$work/sherpa-build"
 sudo cmake --install "$work/build"

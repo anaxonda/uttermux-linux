@@ -216,6 +216,10 @@ sherpa-onnx runtime, runs tests, and invokes `sudo` only for installation.
 Set `UTTERMUX_INSTALL_CHECK_ONLY=1` to verify the release archive without
 building or installing it.
 
+Installer builds use two concurrent compiler jobs to avoid exhausting memory on
+smaller systems. Set `UTTERMUX_BUILD_JOBS` to a positive integer to override
+that limit, for example `UTTERMUX_BUILD_JOBS=8` on a suitable build machine.
+
 ### Build from source
 
 Install build and runtime dependencies:

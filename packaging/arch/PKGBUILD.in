@@ -18,7 +18,19 @@ source=("uttermux-linux-$_release_version.tar.gz::$url/releases/download/$_relea
 sha256sums=('PROJECT_SHA256' 'SHERPA_SHA256' '361fe48ce7ef613adbe30f664e3765dd71029c6cb57427279eff8ad6df2eb211'
             '38f022eec31cf9a2bf6f142acb2a9b350fd7d0d5ae7762b1392c6d3567401fd3')
 
+prepare() {
+  # sherpa-onnx 1.13.6 appends -Wno-format to bundled eSpeak. Arch appends
+  # -Werror=format-security, which GCC 16 rejects after format checking is
+  # disabled. Keep Arch's hardening and remove only the conflicting override.
+  sed -i '/^[[:space:]]*-Wno-format$/d' \
+    sherpa-onnx-1.13.6/cmake/espeak-ng-for-piper.cmake
+  ! grep -Eq '^[[:space:]]*-Wno-format$' \
+    sherpa-onnx-1.13.6/cmake/espeak-ng-for-piper.cmake
+}
+
 build() {
+  local build_jobs=${UTTERMUX_BUILD_JOBS:-2}
+  [[ $build_jobs =~ ^[1-9][0-9]*$ ]] || { error 'UTTERMUX_BUILD_JOBS must be a positive integer'; return 1; }
   cmake -S "sherpa-onnx-1.13.6" -B sherpa-build -G Ninja \
     -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_SHARED_LIBS=ON \
     -DSHERPA_ONNX_ENABLE_TTS=ON -DSHERPA_ONNX_ENABLE_C_API=ON \
@@ -27,11 +39,11 @@ build() {
     -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF \
     -DSHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION=OFF \
     -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=ON
-  ninja -C sherpa-build
+  ninja -C sherpa-build -j "$build_jobs"
 
   cmake -S "uttermux-linux-$_release_version" -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
-  ninja -C build
+  ninja -C build -j "$build_jobs"
 }
 
 package() {

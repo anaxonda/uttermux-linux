@@ -62,6 +62,9 @@ def main() -> int:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
     if "packaging/arch/PKGBUILD.in" not in workflow:
         errors.append("release workflow does not render the Arch package template")
+    espeak_workaround = "'/^[[:space:]]*-Wno-format$/d'"
+    if espeak_workaround not in template or espeak_workaround not in (ROOT / "scripts/install-source").read_text():
+        errors.append("installers lack the GCC 16 bundled-eSpeak format-security workaround")
     for error in errors: print(f"ERROR: {error}", file=sys.stderr)
     return 1 if errors else 0
 
