@@ -49,10 +49,13 @@ def main() -> int:
         if script.suffix in {"", ".py"} and script.is_file() and not script.stat().st_mode & 0o111:
             errors.append(f"script is not executable: {script.relative_to(ROOT)}")
     if not (ROOT / "LICENSE").is_file(): errors.append("LICENSE is missing")
-    # The repository has no public remote yet, so the Arch source hash cannot
-    # be finalized. Keep CI useful but make a release audit fail loudly.
+    # Tag automation resolves these template values and publishes the resulting
+    # PKGBUILD beside the deterministic source archive. Keep ordinary CI useful
+    # while making a manual release audit fail on the unresolved template.
     pkgbuild = (ROOT / "packaging/arch/PKGBUILD").read_text()
-    if not args.ci and ("SKIP" in pkgbuild or "github.com/anaxonda/uttermux-linux" not in pkgbuild):
+    placeholders = ("SKIP", "PROJECT_SHA256", "SHERPA_SHA256")
+    if not args.ci and (any(item in pkgbuild for item in placeholders) or
+                        "github.com/anaxonda/uttermux-linux" not in pkgbuild):
         errors.append("Arch package still has placeholder repository URL or hashes")
     for error in errors: print(f"ERROR: {error}", file=sys.stderr)
     return 1 if errors else 0

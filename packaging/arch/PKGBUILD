@@ -9,12 +9,12 @@ license=(GPL-3.0-or-later)
 depends=('speech-dispatcher>=0.12' libspeechd rubberband python python-gobject gtk4 python-numpy python-aiohttp python-certifi curl ffmpeg libpulse onnxruntime-cpu)
 optdepends=('wl-clipboard: read Wayland selections' 'xclip: read X11 selections' 'xsel: alternate X11 selection reader')
 makedepends=(cmake ninja gcc git)
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+source=("uttermux-linux-$pkgver.tar.gz::$url/releases/download/v$pkgver/uttermux-linux-$pkgver.tar.gz"
         "sherpa-onnx-1.13.6.tar.gz::https://github.com/k2-fsa/sherpa-onnx/archive/refs/tags/v1.13.6.tar.gz"
-        "edge_tts-7.2.8-py3-none-any.whl::https://files.pythonhosted.org/packages/py3/e/edge-tts/edge_tts-7.2.8-py3-none-any.whl"
+        "edge_tts-7.2.8-py3-none-any.whl::https://files.pythonhosted.org/packages/8c/2b/a8cb687b92a2690d2ad171f0c2fd1c8f18690363cca7618bab2bbe4cdf2b/edge_tts-7.2.8-py3-none-any.whl"
         "py3langid-0.3.0-py3-none-any.whl::https://files.pythonhosted.org/packages/9d/1c/8212ea872d236af0aea37043fb6feeaa9a43449183782b19d342f8ddd343/py3langid-0.3.0-py3-none-any.whl")
-sha256sums=('SKIP' 'SKIP' '361fe48ce7ef613adbe30f664e3765dd71029c6cb57427279eff8ad6df2eb211'
-            '38f022eec31cf9a2bf6f142acb2a9b350fd7d0d5ae7762b1392c6d3567401fd3') # Release automation replaces project/sherpa values.
+sha256sums=('PROJECT_SHA256' 'SHERPA_SHA256' '361fe48ce7ef613adbe30f664e3765dd71029c6cb57427279eff8ad6df2eb211'
+            '38f022eec31cf9a2bf6f142acb2a9b350fd7d0d5ae7762b1392c6d3567401fd3') # Release automation resolves the first two values.
 
 build() {
   cmake -S "sherpa-onnx-1.13.6" -B sherpa-build -G Ninja \
@@ -27,7 +27,7 @@ build() {
     -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=ON
   ninja -C sherpa-build
 
-  cmake -S "$pkgname-$pkgver" -B build -G Ninja \
+  cmake -S "uttermux-linux-$pkgver" -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
   ninja -C build
 }
