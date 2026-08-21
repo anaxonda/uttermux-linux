@@ -9,9 +9,10 @@ Aloud, Speech Dispatcher applications, KOReader, and a desktop shortcut for
 speaking selected text. Local models stay loaded in a background broker, while
 online providers use the same voice selection and language-routing rules.
 
-> **Project status:** active development. The Linux desktop stack works on the
-> project's Arch Linux test system, but packaging and cross-distribution testing
-> are not finished. No voice model is bundled; users choose what to download.
+> **Status:** beta. Arch Linux is the development platform; Debian trixie and
+> alternate-prefix source builds run in CI. No model weights are bundled.
+
+![UtterMux desktop voice catalog](docs/screenshots/linux-voices.png)
 
 ## Why UtterMux?
 
@@ -39,7 +40,7 @@ The GTK application has the same three top-level areas as the Android app:
 - **Create voice** — create and manage Pocket, ZipVoice, or ElevenLabs clones.
 - **Settings** — configure providers, routing, model caching, and diagnostics.
 
-The application is optional. Every operation also has a CLI equivalent.
+The GTK application and CLI operate on the same catalog and configuration.
 
 ## Features
 
@@ -57,25 +58,38 @@ The application is optional. Every operation also has a CLI equivalent.
 - Compatibility bridge for the existing KOReader localhost TTS plugin.
 - Cancellation without changing voices halfway through an utterance.
 
-## Supported voices
+## Local model catalog
 
-No model is downloaded automatically.
+Each row is a concrete artifact present in `catalog/catalog.toml`. Downloads
+occur only after an install action. Sizes are compressed transfer sizes; RAM is
+an engineering estimate used by the UI's advisory filter, not a benchmark.
 
-| Engine or provider | Runs | Status | Cloning | Typical model download | Notes |
-| --- | --- | --- | --- | ---: | --- |
-| Piper / VITS | Locally | Supported | No | 20–150 MB | Fast, dependable baseline |
-| Inflect Nano v2 | Locally | Supported | No | 21 MB | Very small English voice |
-| Kitten Nano INT8 | Locally | Supported | No | 30 MB | Eight English speakers |
-| Kokoro 82M FP32 | Locally | Supported | No | 333 MB | Higher quality; preload recommended |
-| Matcha | Locally | Downloadable | No | 77 MB | Uses a separate vocoder |
-| Supertonic 3 INT8 | Locally | Downloadable | No | 129 MB | Multilingual styles |
-| Pocket INT8 | Locally | Supported | Yes | 176 MB | Presets or a reference recording |
-| ZipVoice Distill INT8 | Locally | Supported | Yes | 156 MB | English/Chinese; exact transcript required |
-| MOSS-TTS-Nano 100M ONNX | Local companion | Optional | Upstream supports it; presets exposed | 728 MB | 20 languages; parallel streaming; ~1.4 GB RAM |
-| Qwen3-TTS 0.6B CustomVoice | Local companion | Optional | Planned | ~2.4 GB | Intended for newer/faster systems |
-| Microsoft Edge | Online | Supported | No | — | Free unofficial consumer endpoint |
-| ElevenLabs | Online | Supported | Yes | — | Subscription and API key required |
-| xAI / Grok | Online | Supported | Provider managed | — | Multilingual automatic-language mode |
+| Catalog artifact | Engine | Languages / voices exposed | Clone | Download | Est. RAM | Precision | Integration | Upstream |
+| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |
+| `vits-inflect-en-nano-v2` | VITS | English; 1 | No | 21 MiB | 100 MiB | FP32 | sherpa-onnx C API | [Inflect Nano v2](https://huggingface.co/owensong/Inflect-Nano-v2) |
+| `kitten-nano-en-v0_1-fp16` | Kitten | English; 1 | No | 26 MiB | 180 MiB | FP16 | sherpa-onnx C API | [KittenTTS](https://github.com/KittenML/KittenTTS) |
+| `kitten-nano-en-v0_8-int8` | Kitten | English; 8 | No | 30 MiB | 180 MiB | INT8 | sherpa-onnx C API | [KittenTTS](https://github.com/KittenML/KittenTTS) |
+| `vits-piper-en_US-lessac-medium` | Piper/VITS | English; 1 | No | 64 MiB | 180 MiB | FP32 | sherpa-onnx C API | [Piper](https://github.com/OHF-Voice/piper1-gpl) |
+| `matcha-icefall-en_US-ljspeech` | Matcha + Vocos | English; 1 | No | 77 MiB | 320 MiB | FP32 | sherpa-onnx C API | [Matcha-TTS](https://github.com/shivammehta25/Matcha-TTS) |
+| `sherpa-onnx-supertonic-3-tts-int8-2026-05-11` | Supertonic 3 | Multilingual; 10 styles | No | 129 MiB | 420 MiB | INT8 | sherpa-onnx C API | [Supertonic](https://github.com/supertone-inc/supertonic) |
+| `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` | ZipVoice Distill | English/Chinese; user profiles | Yes | 156 MiB | 650 MiB | INT8 | sherpa-onnx C API | [ZipVoice](https://github.com/k2-fsa/ZipVoice) |
+| `sherpa-onnx-pocket-tts-int8-2026-01-26` | Pocket | English; 4 presets + profiles | Yes | 176 MiB | 420 MiB | INT8 | sherpa-onnx C API | [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) |
+| `kokoro-multi-lang-v1_0` | Kokoro 82M | English/Chinese; 53 upstream, 6 named in catalog | No | 333 MiB | 560 MiB | FP32 | sherpa-onnx C API | [Kokoro in sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/kokoro.html) |
+| `moss-tts-nano-100m-onnx` | MOSS Nano | 20 languages; preset references | No | 728 MiB | 1.4 GiB | FP32 | external persistent ONNX adapter | [MOSS-TTS-Nano](https://github.com/OpenMOSS/MOSS-TTS-Nano) |
+| `qwen3-tts-0.6b-customvoice` | Qwen3-TTS | 10 languages; 9 built-in voices | No | ~2.4 GiB | 3 GiB | runtime INT8 | external persistent C++ adapter | [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) |
+
+Kokoro INT8 v1.1 exists upstream, but it is not in this Linux catalog. FP8 is
+not supported by the current CPU-only ONNX execution path and is therefore not
+listed as a runnable variant. A distinct artifact is added only after its files,
+runtime configuration, checksum, license, and synthesis path are tested.
+
+## Online providers
+
+| Provider | Authentication | Catalog status |
+| --- | --- | --- |
+| Microsoft Edge Read Aloud | none | implemented; live locale discovery |
+| ElevenLabs | API key | implemented; account voice discovery and cloning |
+| xAI / Grok | API key | implemented; provider voices and automatic language mode |
 
 Azure, Google, AWS, OpenAI, Deepgram, Cartesia, PlayHT, and Resemble have
 catalog/provider scaffolding but are not advertised as working until each has
@@ -85,12 +99,14 @@ MOSS-TTS-Nano uses a persistent, cancellable two-stage adapter. Generation and
 codec decoding run concurrently through bounded queues; unlike the upstream
 long-form helper, UtterMux does not add fixed silence between text chunks. A
 warm benchmark reached RTF 0.86 and first PCM in 0.66 seconds on the i7-8650U
-test system. It remains optional because its 728 MiB model and roughly 1.4 GiB
-working set are substantial. See [MOSS benchmark notes](docs/moss-benchmarks.md).
+test system. It is installed only by an explicit model-install action because
+its 728 MiB transfer and roughly 1.4 GiB working set are substantial. See
+[MOSS benchmark notes](docs/moss-benchmarks.md).
 
 Qwen works but is too slow for continuous reading on the older i7-8650U
-reference laptop. Faster CPUs and supported GPUs can run it at or above real
-time. See [Qwen benchmark notes](docs/qwen-benchmarks.md).
+reference laptop. The current UtterMux adapter is a CPU path; no GPU claim is
+made. Faster systems require their own benchmark before continuous-reading use.
+See [Qwen benchmark notes](docs/qwen-benchmarks.md).
 
 ## Install on Arch Linux
 
@@ -148,6 +164,7 @@ uttermux model list
 uttermux model install vits-inflect-en-nano-v2
 uttermux model install moss-tts-nano-100m-onnx
 uttermux preview sherpa/vits-inflect-en-nano-v2/default
+uttermux benchmark sherpa/vits-inflect-en-nano-v2/default --runs 3
 uttermux default sherpa/vits-inflect-en-nano-v2/default
 uttermux speak-selection
 uttermux speak-selection --clipboard
@@ -183,16 +200,18 @@ does not tune its concurrent generator/decoder pipeline.
 
 ## Model variants and custom models
 
-Catalog entries represent concrete artifacts, not only model families. Several
-variants of one family—FP32, FP16, INT8, small, medium, or high-quality—can
-coexist. The manager shows download size, estimated working memory,
-quantization, and measured performance class, and can sort by download or RAM.
+Catalog entries represent concrete artifacts, not only model families. FP32,
+FP16, INT8, size, or quality variants can coexist when each has a verified
+runtime configuration. The manager shows transfer size, estimated working
+memory, quantization, and an advisory performance class, and can sort by
+download or RAM.
 The manager combines those fields with detected CPU features and available
 memory and labels each artifact **Recommended here**, **Likely usable**, **May
-be slow**, or with a memory warning. These are conservative estimates until a
-model has been benchmarked locally. UtterMux reports only the CPU inference
-provider it actually supports; it does not display speculative GPU suitability.
-Recommendations never trigger a download or hide an incompatible model.
+be slow**, or with a memory warning. Those labels are deterministic heuristics
+derived from logical CPU count, available RAM, catalog RAM estimates, and the
+catalog performance class. They are not benchmark results. This build exposes
+only the CPU execution provider; it does not claim GPU acceleration. Labels do
+not download, disable, or hide artifacts.
 
 Inspect the non-identifying local capability report with:
 
@@ -200,12 +219,22 @@ Inspect the non-identifying local capability report with:
 uttermux hardware --json
 ```
 
-Custom sherpa-onnx models can be registered with a schema-1 manifest in
-`~/.config/uttermux/models.d/`. A custom model is data plus declarative paths;
-UtterMux does not execute installer commands from user catalogs. The planned
-GUI importer will validate the engine, BCP-47 voice metadata, required files,
-and paths. Downloadable third-party catalogs will require fixed HTTPS URLs and
-SHA-256 hashes.
+Measure broker synthesis without audio-device playback:
+
+```sh
+uttermux benchmark "Kokoro Bella" --runs 3 --json
+```
+
+The report contains time to first PCM, synthesis wall time, generated audio
+duration, and real-time factor (RTF). Run 1 includes model initialization only
+when that model was not already warm; later runs measure the warm path. The
+command does not control CPU frequency, temperature, or background load.
+Published results should state the machine, text, thread settings, and whether
+the broker was restarted.
+
+Use [`docs/custom-models.md`](docs/custom-models.md) for a complete schema-1
+Piper/VITS manifest and verification commands. The production C++ parser tests
+that example. The GTK GUI does not yet import custom manifests.
 
 ## Distribution support
 
@@ -333,6 +362,25 @@ Architecture and benchmark notes:
 - [Catalog schema](docs/interop/catalog-v1.schema.json)
 - [MOSS-TTS-Nano experiments](docs/moss-benchmarks.md)
 - [Qwen3-TTS experiments](docs/qwen-benchmarks.md)
+
+Related projects and design references:
+
+- [Speech Dispatcher](https://github.com/brailcom/speechd) defines the Linux
+  SSIP boundary and external-module API.
+- [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) supplies the shared local
+  inference API and model exports.
+- [Pied](https://github.com/Elleo/pied) demonstrated desktop Piper management
+  through Speech Dispatcher.
+- [voicego](https://github.com/Ravino/voicego) is an independent SSIP server
+  with isolated engines and streaming PCM.
+- [NekoSpeak](https://github.com/siva-sub/NekoSpeak) informed the separation of
+  synthesis, bounded buffering, playback, and cancellation.
+- [HayaiTTS](https://github.com/HayaiApp/HayaiTTS) is a similar Android system
+  engine built around sherpa-onnx and a large offline catalog.
+- [Read Aloud](https://github.com/ken107/read-aloud) covers many browser cloud
+  providers; its provider contracts informed UtterMux's online adapters.
+- [KOReader](https://github.com/koreader/koreader), Firefox Reader View, and
+  Zotero Read Aloud are interoperability targets, not embedded components.
 
 Contributions should keep stable voice IDs, BCP-47 language metadata,
 cancellation, and application highlighting semantics intact. A provider must

@@ -49,6 +49,16 @@ class CliTests(unittest.TestCase):
         self.assertIn("--format=s16le", popen.call_args.args[0])
         self.assertIn("--channels=1", popen.call_args.args[0])
 
+    def test_benchmark_reports_first_audio_duration_and_rtf(self):
+        packets = [(ut.AUDIO_START, __import__("struct").pack("<IB", 1000, 2)),
+                   (ut.AUDIO, b"\0" * 2000)]
+        with mock.patch.object(ut, "transact", return_value=iter(packets)), \
+             mock.patch.object(ut.time, "perf_counter", side_effect=(10.0, 10.1, 10.25, 10.5)):
+            result = ut.benchmark_once("sherpa/test", "Test", "en-US")
+        self.assertEqual(result["firstAudioMs"], 250.0)
+        self.assertEqual(result["audioSeconds"], 1.0)
+        self.assertEqual(result["rtf"], 0.5)
+
     def test_schema_two_preserves_language_routes(self):
         rendered = ut.render_config({
             "default_voice": "edge/libby", "fallback_voice": "local/lessac",

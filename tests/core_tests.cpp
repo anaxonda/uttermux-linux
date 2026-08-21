@@ -3,6 +3,8 @@
 #include "uttermux/text.hpp"
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <vector>
 
@@ -24,6 +26,28 @@ int main() {
   std::vector<sdsherpa::Model> models{model};
   auto selected = sdsherpa::resolve_voice(models, "", "en-GB", "US Voice");
   check(selected.voice && selected.voice->name == "GB Voice", "requested language precedes default voice");
+  auto fixture = std::filesystem::temp_directory_path() / "uttermux-manifest-test";
+  std::filesystem::create_directories(fixture / "model/espeak-ng-data");
+  for (const auto *name : {"model.onnx", "tokens.txt"})
+    std::ofstream(fixture / "model" / name).put('\n');
+  {
+    std::ofstream manifest(fixture / "custom-piper.toml");
+    manifest << "schema_version = 1\nid = \"custom-piper\"\nengine = \"vits\"\n"
+                "root = \"model\"\nprovider = \"cpu\"\nnum_threads = 2\n"
+                "length_scale = 1.0\nnoise_scale = 0.667\nnoise_scale_w = 0.8\n\n"
+                "[files]\nmodel = \"model.onnx\"\ntokens = \"tokens.txt\"\n"
+                "data_dir = \"espeak-ng-data\"\n\n[[voice]]\nid = \"default\"\n"
+                "name = \"Custom Piper\"\nlanguage = \"en-US\"\nspeaker_id = 0\n";
+  }
+  try {
+    sdsherpa::Settings defaults;
+    auto custom = sdsherpa::load_model(fixture / "custom-piper.toml", defaults);
+    check(custom.id == "custom-piper" && custom.voice_list.size() == 1,
+          "documented custom Piper manifest loads");
+  } catch (const std::exception &error) {
+    std::cerr << "FAIL: documented custom manifest: " << error.what() << '\n'; ++failures;
+  }
+  std::filesystem::remove_all(fixture);
   check(uttermux::text_from_ssml("<speak>Hello world.</speak>") == "Hello world.",
         "sentence SSML wrapper is removed");
   check(uttermux::text_from_ssml("&lt;speak&gt;Hello world.&lt;/speak&gt;") == "Hello world.",

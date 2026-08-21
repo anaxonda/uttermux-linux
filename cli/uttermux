@@ -768,6 +768,66 @@ def cmd_preview(args):
             playback.terminate()
 
 
+def benchmark_once(voice_id: str, text: str, language: str = "") -> dict:
+    """Measure broker synthesis without including audio-device playback."""
+    payload = b"\0".join(value.encode("utf-8") for value in
+                         (voice_id, "1.0", text, language)) + b"\0"
+    started_at = time.perf_counter()
+    first_audio_at = None
+    sample_rate = 0
+    bytes_per_sample = 0
+    audio_bytes = 0
+    for kind, raw in transact(SPEAK, payload):
+        now = time.perf_counter()
+        if kind == AUDIO_START:
+            if len(raw) < 5: raise RuntimeError("invalid audio header from broker")
+            sample_rate, sample_format = struct.unpack_from("<IB", raw)
+            bytes_per_sample = {1: 4, 2: 2}.get(sample_format, 0)
+            if not bytes_per_sample:
+                raise RuntimeError(f"unsupported broker audio format: {sample_format}")
+        elif kind == AUDIO:
+            if not sample_rate: raise RuntimeError("broker sent samples before an audio header")
+            if first_audio_at is None: first_audio_at = now
+            audio_bytes += len(raw)
+    finished_at = time.perf_counter()
+    if first_audio_at is None or not audio_bytes:
+        raise RuntimeError("broker returned no audio")
+    audio_seconds = audio_bytes / (sample_rate * bytes_per_sample)
+    wall_seconds = finished_at - started_at
+    return {
+        "firstAudioMs": round((first_audio_at - started_at) * 1000, 1),
+        "wallMs": round(wall_seconds * 1000, 1),
+        "audioSeconds": round(audio_seconds, 3),
+        "rtf": round(wall_seconds / audio_seconds, 3),
+        "sampleRate": sample_rate,
+    }
+
+
+def cmd_benchmark(args):
+    record = next((record for record in voice_records()
+                   if record["id"] == args.voice or record["name"] == args.voice), None)
+    if not record: raise RuntimeError(f"unknown voice: {args.voice}")
+    language = args.language or record.get("native_language", "")
+    runs = [benchmark_once(record["id"], args.text, language) for _ in range(args.runs)]
+    result = {
+        "schemaVersion": 1,
+        "voice": record["id"],
+        "language": language,
+        "characters": len(args.text),
+        "runs": runs,
+        "note": "Run 1 includes model loading only when the broker had not already loaded it; playback is excluded.",
+    }
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return
+    print(f"{record['name']} ({record['id']}), {len(args.text)} characters")
+    print("run  first_audio_ms  wall_ms  audio_s  rtf")
+    for index, run in enumerate(runs, 1):
+        print(f"{index:>3}  {run['firstAudioMs']:>14.1f}  {run['wallMs']:>7.1f}  "
+              f"{run['audioSeconds']:>7.3f}  {run['rtf']:>5.3f}")
+    print(result["note"])
+
+
 def GLib_find_program(name: str) -> str | None:
     """Avoid importing GTK's GLib into the command-line client."""
     return shutil.which(name)
@@ -946,6 +1006,10 @@ def main():
     p = sub.add_parser("add-voice"); p.add_argument("provider", choices=("elevenlabs",)); p.add_argument("voice"); p.add_argument("--owner", required=True); p.add_argument("--name", required=True); p.add_argument("--language", required=True); p.set_defaults(func=cmd_add_voice)
     p = sub.add_parser("detect"); p.add_argument("text", nargs="?", default="-"); p.set_defaults(func=cmd_detect)
     p = sub.add_parser("preview"); p.add_argument("voice"); p.add_argument("text", nargs="?", default="UtterMux voice preview."); p.add_argument("--language"); p.set_defaults(func=cmd_preview)
+    p = sub.add_parser("benchmark"); p.add_argument("voice")
+    p.add_argument("text", nargs="?", default="UtterMux measures synthesis latency and real time factor with this sentence.")
+    p.add_argument("--language"); p.add_argument("--runs", type=int, default=3, choices=range(1, 11))
+    p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_benchmark)
     p = sub.add_parser("preview-url"); p.add_argument("url"); p.set_defaults(func=cmd_preview_url)
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
     p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.set_defaults(func=cmd_provider)
