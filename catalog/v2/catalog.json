@@ -198,7 +198,7 @@
     "curatedSource": "catalog.toml",
     "piperSha256": "636e877eacf3c2904aa6aa8088c867bd3cd9df7f39d2023b73d0660a59249c19",
     "piperSource": "piper.json",
-    "platformSha256": "165f89efa00244aaa7a11970b484bc83102e037e58039bfed1e5a671d30d6605",
+    "platformSha256": "72f8e9ad3d39a0f92c69180761916cd30b0ca5c709971039573ca4a83013578c",
     "platformSource": "platform-variants.toml"
   },
   "providers": [
@@ -441,7 +441,7 @@
           "role": "asset",
           "sha256": "4b468ec7b1f62b90ef4ca316c0aa57deadfd54b2cf9651703ea753cedaf04226",
           "sizeBytes": 0,
-          "url": "https://huggingface.co/Jahaz/Qwen3-tts-0.6b-gguf-for-koboldcpp/resolve/968442208ea86f312b6b67ac8ef0c1b551967e35/qwen-talker-0.6b-base-Q4_K_M.gguf"
+          "url": "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/968442208ea86f312b6b67ac8ef0c1b551967e35/qwen-talker-0.6b-base-Q4_K_M.gguf"
         },
         {
           "id": "asset-qwen-tokenizer-12hz-q4-k-m-gguf",
@@ -449,7 +449,7 @@
           "role": "asset",
           "sha256": "cf3788b4d50aaa665fb6e57c170396aae03a3555fea52d2b5d0cda902d658039",
           "sizeBytes": 0,
-          "url": "https://huggingface.co/Jahaz/Qwen3-tts-0.6b-gguf-for-koboldcpp/resolve/968442208ea86f312b6b67ac8ef0c1b551967e35/qwen-tokenizer-12hz-Q4_K_M.gguf"
+          "url": "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/968442208ea86f312b6b67ac8ef0c1b551967e35/qwen-tokenizer-12hz-Q4_K_M.gguf"
         }
       ],
       "capabilities": [
