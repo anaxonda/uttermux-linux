@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.4.0-beta.1 - Unreleased
+## 0.4.0-beta.2 - 2026-08-21
+
+- Added adaptive hardware tuning, per-model controls, benchmark reports, and heavy-model guidance.
+- Added generated cross-platform catalogs and reproducible Arch release packaging.
+- Improved Pocket, Kokoro, MOSS, and Qwen runtime diagnostics and memory behavior.
+- Fixed stale empty Speech Dispatcher requests and VITS/Pocket contraction artifacts.
+- Added the full-color tray icon and public release documentation.
+
+## 0.4.0-beta.1 - 2026-08-21
 
 First public beta of the Linux desktop broker and voice manager.
 

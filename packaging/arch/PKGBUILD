@@ -1,6 +1,6 @@
 # Maintainer: UtterMux contributors
 pkgname=uttermux
-pkgver=0.4.0
+pkgver=0.4.0_beta2
 pkgrel=1
 pkgdesc='Universal local and online TTS broker for Speech Dispatcher'
 arch=(x86_64 aarch64)
@@ -9,7 +9,9 @@ license=(GPL-3.0-or-later)
 depends=('speech-dispatcher>=0.12' libspeechd rubberband python python-gobject gtk4 python-numpy python-aiohttp python-certifi curl ffmpeg libpulse onnxruntime-cpu)
 optdepends=('wl-clipboard: read Wayland selections' 'xclip: read X11 selections' 'xsel: alternate X11 selection reader')
 makedepends=(cmake ninja gcc git)
-source=("uttermux-linux-$pkgver.tar.gz::$url/releases/download/v$pkgver/uttermux-linux-$pkgver.tar.gz"
+_release_version=0.4.0-beta.2
+_release_tag=v0.4.0-beta.2
+source=("uttermux-linux-$_release_version.tar.gz::$url/releases/download/$_release_tag/uttermux-linux-$_release_version.tar.gz"
         "sherpa-onnx-1.13.6.tar.gz::https://github.com/k2-fsa/sherpa-onnx/archive/refs/tags/v1.13.6.tar.gz"
         "edge_tts-7.2.8-py3-none-any.whl::https://files.pythonhosted.org/packages/8c/2b/a8cb687b92a2690d2ad171f0c2fd1c8f18690363cca7618bab2bbe4cdf2b/edge_tts-7.2.8-py3-none-any.whl"
         "py3langid-0.3.0-py3-none-any.whl::https://files.pythonhosted.org/packages/9d/1c/8212ea872d236af0aea37043fb6feeaa9a43449183782b19d342f8ddd343/py3langid-0.3.0-py3-none-any.whl")
@@ -27,7 +29,7 @@ build() {
     -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=ON
   ninja -C sherpa-build
 
-  cmake -S "uttermux-linux-$pkgver" -B build -G Ninja \
+  cmake -S "uttermux-linux-$_release_version" -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
   ninja -C build
 }
