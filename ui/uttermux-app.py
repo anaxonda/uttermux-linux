@@ -582,12 +582,12 @@ class TunePage(Gtk.Box):
 
     def load(self):
         def work():
-            try: result = (run_json("catalog"), run_json("tuning", "list"), run_json("model-setting", "list"))
-            except Exception as error: GLib.idle_add(self.loaded, None, {}, {}, str(error)); return
-            GLib.idle_add(self.loaded, result[0], result[1], result[2], "")
+            try: result = (run_json("catalog"), run_json("tuning", "list"), run_json("model-setting", "list"), run_json("settings-schema"))
+            except Exception as error: GLib.idle_add(self.loaded, None, {}, {}, {}, str(error)); return
+            GLib.idle_add(self.loaded, result[0], result[1], result[2], result[3], "")
         threading.Thread(target=work, daemon=True).start()
 
-    def loaded(self, catalog, tuning, overrides, error):
+    def loaded(self, catalog, tuning, overrides, settings_schema, error):
         while child := self.rows.get_first_child(): self.rows.remove(child)
         if error: self.status.set_text(error); return GLib.SOURCE_REMOVE
         models = {item["id"]: item for item in catalog.get("models", [])}
@@ -620,7 +620,8 @@ class TunePage(Gtk.Box):
             run = Gtk.Button(label="Benchmark" if provider == "local" else "Benchmark current settings")
             run.connect("clicked", self.benchmark if provider == "local" else self.confirm_companion_benchmark, model, voice); controls.append(run)
             settings = Gtk.Button(label="Model settings…")
-            settings.connect("clicked", self.model_settings, model, model_values); controls.append(settings)
+            settings.connect("clicked", self.model_settings, model, model_values,
+                             tuning.get(model["id"], {}), settings_schema.get("playback", {})); controls.append(settings)
             if provider == "local":
                 reset = Gtk.Button(label="Reset", sensitive=applied > 0); reset.connect("clicked", self.reset, model["id"]); controls.append(reset)
             row.append(controls); self.rows.append(row)
@@ -724,34 +725,52 @@ class TunePage(Gtk.Box):
     def reset(self, _button, model_id):
         self.window.run_task(command("tuning", "reset", model_id), "Tuned profile removed", self.load)
 
-    def model_settings(self, _button, model, current):
+    def model_settings(self, _button, model, current, tuning, playback):
         dialog = Gtk.Dialog(title=f"{model.get('name', model['id'])} settings", transient_for=self.window, modal=True)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Save", Gtk.ResponseType.ACCEPT)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
                           margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
         content.append(Gtk.Label(label=("These settings apply only to this installed artifact. "
-            "Unchecked values inherit the tuned profile, global default, or automatic choice."),
+            "Each row identifies the value used when its override is disabled."),
             xalign=0, wrap=True))
-        engine = model.get("engine", "").casefold(); fields = [
-            ("threads", "CPU threads", 1, 16, 1, 2),
+        engine = model.get("engine", "").casefold(); global_threads = (
+            "pocketThreads" if engine == "pocket" else "mossThreads" if engine == "moss" else
+            "" if model.get("providerId") == "qwen" else "localThreads")
+        fields = [
+            ("threads", "CPU threads", 1, 16, 1, 2, global_threads),
         ]
         if model.get("providerId") == "local":
-            fields += [("silence_scale", "Inter-segment silence scale", 0, 2, .05, .2)]
-        if engine == "pocket": fields += [("pocket_num_steps", "Pocket refinement steps", 1, 8, 1, 3),
-                                            ("pocket_chunk_size", "Pocket decoder chunk", 1, 16, 1, 4)]
-        if engine == "zipvoice": fields += [("zipvoice_num_steps", "ZipVoice steps", 1, 8, 1, 4)]
+            fields += [("silence_scale", "Generated silence scale", 0, 2, .05, .2, "localSilenceScale")]
+        if engine == "pocket": fields += [("pocket_num_steps", "Pocket refinement steps", 1, 8, 1, 3, "pocketNumSteps"),
+                                            ("pocket_chunk_size", "Pocket decoder chunk", 1, 16, 1, 4, "pocketChunkSize")]
+        if engine == "zipvoice": fields += [("zipvoice_num_steps", "ZipVoice generation steps", 1, 8, 1, 4, "zipvoiceNumSteps")]
         if engine == "moss" or model.get("providerId") == "moss":
-            fields += [("moss_batch_frames", "MOSS batch frames", 1, 16, 1, 4)]
+            fields += [("moss_batch_frames", "MOSS batch frames", 1, 16, 1, 4, "mossBatchFrames")]
         widgets = {}
-        for key, label, low, high, step, default in fields:
-            line = Gtk.Box(spacing=10); enabled = Gtk.CheckButton(label=label, hexpand=True)
+        for key, label, low, high, step, default, global_key in fields:
+            block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            block.append(Gtk.Label(label=label, xalign=0, css_classes=["heading"]))
+            global_value = playback.get(global_key, {}).get("value", default)
+            if key == "threads" and int(tuning.get("threads", 0)) > 0:
+                base_value, source = int(tuning["threads"]), "saved benchmark profile"
+            elif key == "threads" and int(global_value) == 0:
+                base_value, source = "automatic", "automatic policy"
+            else:
+                base_value, source = global_value, "global default"
+            effective = current.get(key, base_value); effective_source = "model override" if key in current else source
+            block.append(Gtk.Label(label=f"Effective: {effective} · {effective_source}", xalign=0, wrap=True))
+            line = Gtk.Box(spacing=10); enabled = Gtk.CheckButton(label="Override for this model", hexpand=True)
             enabled.set_active(key in current); line.append(enabled)
             adjustment = Gtk.Adjustment(value=float(current.get(key, default)), lower=low, upper=high,
                                         step_increment=step, page_increment=step)
             spin = Gtk.SpinButton(adjustment=adjustment, digits=2 if isinstance(step, float) else 0)
             spin.set_sensitive(enabled.get_active()); enabled.connect("toggled", lambda check, target=spin: target.set_sensitive(check.get_active()))
-            line.append(spin); content.append(line); widgets[key] = (enabled, spin, isinstance(step, float))
-        reset = Gtk.Button(label="Use inherited settings for this model")
+            reset_one = Gtk.Button(label="Reset setting", sensitive=enabled.get_active())
+            enabled.connect("toggled", lambda check, target=reset_one: target.set_sensitive(check.get_active()))
+            reset_one.connect("clicked", lambda _button, check=enabled: check.set_active(False))
+            line.append(spin); line.append(reset_one); block.append(line); content.append(block)
+            widgets[key] = (enabled, spin, isinstance(step, float))
+        reset = Gtk.Button(label="Reset all settings for this model")
         reset.connect("clicked", lambda *_: [item[0].set_active(False) for item in widgets.values()])
         content.append(reset); dialog.get_content_area().append(content)
         def response(_dialog, value):

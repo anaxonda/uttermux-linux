@@ -250,6 +250,10 @@ installed artifact, open **Test & tune → Model settings**. Manual model settin
 take precedence over a saved benchmark profile; a saved profile takes precedence
 over global defaults and automatic selection. Playback buffering, model-cache
 size, language routing, and cloud caching remain global.
+The panel is engine-aware: all sherpa artifacts expose threads and generated
+silence; Pocket adds refinement and decoder chunk size, ZipVoice adds generation
+steps, and MOSS adds decode batching. Every row reports its effective value and
+source and can be reset independently.
 
 The same controls are scriptable. Values omitted from the JSON object inherit:
 
