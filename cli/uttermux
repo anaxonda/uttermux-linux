@@ -832,6 +832,16 @@ def cmd_benchmark(args):
     record = next((record for record in voice_records()
                    if record["id"] == args.voice or record["name"] == args.voice), None)
     if not record: raise RuntimeError(f"unknown voice: {args.voice}")
+    provider = record.get("provider", "")
+    if provider in {"moss", "qwen"} and not getattr(args, "force_low_memory", False):
+        model = next((item for item in local_catalog() if item.get("engine") == provider), {})
+        estimated = int(model.get("estimatedRamMb", 1400 if provider == "moss" else 3000))
+        available = int(hardware_profile().get("availableRamMb", 0))
+        safe_required = estimated + 2048
+        if available and available < safe_required:
+            raise RuntimeError(f"refusing {provider} benchmark under memory pressure: "
+                               f"{available} MB available, about {safe_required} MB safe headroom required; "
+                               "close applications or pass --force-low-memory")
     language = args.language or record.get("native_language", "")
     runs = [benchmark_once(record["id"], args.text, language) for _ in range(args.runs)]
     result = {
@@ -1140,7 +1150,7 @@ def main():
     p.add_argument("text", nargs="?", default="UtterMux measures synthesis latency and real time factor with this sentence.")
     p.add_argument("--language"); p.add_argument("--runs", type=int, default=3, choices=range(1, 11))
     p.add_argument("--json", action="store_true"); p.add_argument("--save", action="store_true")
-    p.add_argument("--output"); p.set_defaults(func=cmd_benchmark)
+    p.add_argument("--output"); p.add_argument("--force-low-memory", action="store_true"); p.set_defaults(func=cmd_benchmark)
     p = sub.add_parser("tune"); p.add_argument("voice")
     p.add_argument("text", nargs="?", default=None)
     p.add_argument("--language"); p.add_argument("--threads", nargs="+", type=int)

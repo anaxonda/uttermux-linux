@@ -76,6 +76,17 @@ class CliTests(unittest.TestCase):
         self.assertEqual(document["summary"]["medianRtf"], 0.5)
         self.assertTrue(document["summary"]["continuousReading"])
 
+    def test_heavy_benchmark_refuses_unsafe_available_memory(self):
+        args = __import__("argparse").Namespace(voice="Ava", text="Hello", language="",
+            runs=1, json=True, save=False, output=None, force_low_memory=False)
+        record = {"id": "moss/ava", "name": "Ava", "native_language": "en-US",
+                  "provider": "moss", "model": "MOSS"}
+        with mock.patch.object(ut, "voice_records", return_value=[record]), \
+             mock.patch.object(ut, "local_catalog", return_value=[{"engine": "moss", "estimatedRamMb": 1400}]), \
+             mock.patch.object(ut, "hardware_profile", return_value={"availableRamMb": 1900}):
+            with self.assertRaisesRegex(RuntimeError, "memory pressure"):
+                ut.cmd_benchmark(args)
+
     def test_schema_two_preserves_language_routes(self):
         rendered = ut.render_config({
             "default_voice": "edge/libby", "fallback_voice": "local/lessac",

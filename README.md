@@ -263,6 +263,11 @@ Measure broker synthesis without audio-device playback:
 uttermux benchmark "Kokoro Bella" --runs 3 --json
 ```
 
+Repeated MOSS and Qwen benchmarks require the model estimate plus 2 GiB of
+currently available host memory. The CLI refuses a heavy run below that margin;
+`--force-low-memory` is available for controlled testing where an out-of-memory
+kill is acceptable.
+
 The report contains time to first PCM, synthesis wall time, generated audio
 duration, and real-time factor (RTF). Run 1 includes model initialization only
 when that model was not already warm; later runs measure the warm path. The
