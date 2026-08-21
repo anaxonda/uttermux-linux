@@ -869,11 +869,16 @@ class Broker:
                                              ("grok", GrokProvider), ("qwen", QwenProvider),
                                              ("moss", MossProvider)):
             cfg = provider_config.get(provider_name, {})
+            if provider_name == "qwen":
+                cfg = dict(cfg)
+                override = self.config.get("model_overrides", {}).get("qwen3-tts-0.6b-customvoice", {})
+                if override.get("threads"): cfg["threads"] = int(override["threads"])
             if provider_name == "moss":
                 cfg = dict(cfg)
+                override = self.config.get("model_overrides", {}).get(cfg.get("model_id", "moss-tts-nano-100m-onnx"), {})
                 configured_threads = int(self.config.get("moss_threads", 0))
-                cfg.setdefault("threads", configured_threads or automatic_threads("moss"))
-                cfg.setdefault("batch_frames", self.config.get("moss_batch_frames", 4))
+                cfg.setdefault("threads", int(override.get("threads", 0)) or configured_threads or automatic_threads("moss"))
+                cfg.setdefault("batch_frames", int(override.get("moss_batch_frames", self.config.get("moss_batch_frames", 4))))
             if provider_name in {"qwen", "moss"}:
                 cfg = dict(cfg)
                 cfg.setdefault("idle_seconds", self.config.get("external_idle_seconds", 120))
@@ -914,6 +919,7 @@ class Broker:
                 engine.lock.acquire()
                 return engine
             effective_model = dict(model)
+            override = self.config.get("model_overrides", {}).get(model["id"], {})
             setting = "pocket_threads" if model.get("engine") == "pocket" else "local_threads"
             tuning = self.config.get("tuning", {}).get("models", {}).get(model["id"], {})
             fingerprint_matches = (not tuning.get("artifact_sha256") or not model.get("artifact_sha256") or
@@ -922,11 +928,11 @@ class Broker:
             runtime_matches = int(tuning.get("runtime_revision", TUNING_RUNTIME_REVISION)) == TUNING_RUNTIME_REVISION
             tuned = int(tuning.get("threads", 0)) if fingerprint_matches and protocol_matches and runtime_matches else 0
             configured_threads = int(self.config.get(setting, 0))
-            effective_model["num_threads"] = thread_override or tuned or configured_threads or automatic_threads(model.get("engine", ""))
-            effective_model["silence_scale"] = float(self.config.get("local_silence_scale", .2))
-            effective_model["pocket_num_steps"] = int(self.config.get("pocket_num_steps", 3))
-            effective_model["pocket_chunk_size"] = int(self.config.get("pocket_chunk_size", 4))
-            effective_model["zipvoice_num_steps"] = int(self.config.get("zipvoice_num_steps", 4))
+            effective_model["num_threads"] = thread_override or int(override.get("threads", 0)) or tuned or configured_threads or automatic_threads(model.get("engine", ""))
+            effective_model["silence_scale"] = float(override.get("silence_scale", self.config.get("local_silence_scale", .2)))
+            effective_model["pocket_num_steps"] = int(override.get("pocket_num_steps", self.config.get("pocket_num_steps", 3)))
+            effective_model["pocket_chunk_size"] = int(override.get("pocket_chunk_size", self.config.get("pocket_chunk_size", 4)))
+            effective_model["zipvoice_num_steps"] = int(override.get("zipvoice_num_steps", self.config.get("zipvoice_num_steps", 4)))
             engine = SherpaEngine(self.api, effective_model)
             self.engines[model_id] = engine
             while len(self.engines) > self.max_loaded_models:

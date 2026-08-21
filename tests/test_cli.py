@@ -120,6 +120,14 @@ class CliTests(unittest.TestCase):
         self.assertEqual(document["tuning"]["models"]["kokoro-multi-lang-v1_1"]["threads"], 6)
         self.assertEqual(document["tuning"]["models"]["kokoro-multi-lang-v1_1"]["runtime_revision"], 1)
 
+    def test_render_preserves_model_overrides(self):
+        rendered = ut.render_config({"model_overrides": {"pocket": {
+            "threads": 3, "pocket_num_steps": 2, "silence_scale": .1}}})
+        document = __import__("tomllib").loads(rendered)
+        self.assertEqual(document["model_overrides"]["pocket"]["threads"], 3)
+        self.assertEqual(document["model_overrides"]["pocket"]["pocket_num_steps"], 2)
+        self.assertEqual(document["model_overrides"]["pocket"]["silence_scale"], .1)
+
     def test_benchmark_passage_follows_voice_language(self):
         self.assertIn("démarrage", ut.benchmark_passage("fr-FR"))
         self.assertIn("startup", ut.benchmark_passage("en-US"))

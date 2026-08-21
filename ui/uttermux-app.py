@@ -391,10 +391,10 @@ class SettingsPage(Gtk.Box):
             self.provider_switches[provider] = toggle; row.append(toggle); providers_box.append(row)
         self.append(providers_box)
 
-        advanced = Gtk.Expander(label="Advanced playback and language routing")
+        advanced = Gtk.Expander(label="Global defaults, playback, and language routing")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
                       margin_top=10, margin_bottom=8, margin_start=8, margin_end=8)
-        box.append(Gtk.Label(label="These controls affect the broker used by Firefox, Zotero, selection reading, and KOReader.", xalign=0, wrap=True))
+        box.append(Gtk.Label(label="These are global defaults for Firefox, Zotero, selection reading, and KOReader. Per-artifact values on Test & tune take precedence.", xalign=0, wrap=True))
         self.auto_language = Gtk.Switch(); self.auto_language.connect("state-set", self.set_boolean, "auto-detect-language")
         box.append(self.setting_row("Detect language automatically", "Routes longer text to a compatible configured voice.", self.auto_language))
         self.preload_voice = Gtk.Switch(); self.preload_voice.connect("state-set", self.set_boolean, "preload-default-voice")
@@ -582,12 +582,12 @@ class TunePage(Gtk.Box):
 
     def load(self):
         def work():
-            try: result = (run_json("catalog"), run_json("tuning", "list"))
-            except Exception as error: GLib.idle_add(self.loaded, None, {}, str(error)); return
-            GLib.idle_add(self.loaded, result[0], result[1], "")
+            try: result = (run_json("catalog"), run_json("tuning", "list"), run_json("model-setting", "list"))
+            except Exception as error: GLib.idle_add(self.loaded, None, {}, {}, str(error)); return
+            GLib.idle_add(self.loaded, result[0], result[1], result[2], "")
         threading.Thread(target=work, daemon=True).start()
 
-    def loaded(self, catalog, tuning, error):
+    def loaded(self, catalog, tuning, overrides, error):
         while child := self.rows.get_first_child(): self.rows.remove(child)
         if error: self.status.set_text(error); return GLib.SOURCE_REMOVE
         models = {item["id"]: item for item in catalog.get("models", [])}
@@ -605,13 +605,22 @@ class TunePage(Gtk.Box):
             row.append(Gtk.Label(label=facts, xalign=0, wrap=True))
             controls = Gtk.Box(spacing=8); provider = model.get("providerId", "local")
             applied = int(tuning.get(model["id"], {}).get("threads", 0)) if provider == "local" else 0
-            state_text = (f"{applied} threads · Tuned" if applied else "Automatic/global tuning") if provider == "local" else "Companion runtime · benchmarks current settings"
+            model_values = overrides.get(model["id"], {})
+            if model_values.get("threads"):
+                state_text = f"{model_values['threads']} threads · Model override"
+            elif applied:
+                state_text = f"{applied} threads · Tuned"
+            else:
+                state_text = "Inherits global default or automatic choice"
+            if provider != "local": state_text = "Model override" if model_values else "Companion runtime · global defaults"
             state = Gtk.Label(label=state_text, xalign=0, hexpand=True, wrap=True)
             controls.append(state)
             preview_spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER); controls.append(preview_spinner)
             preview = Gtk.Button(label="Preview"); preview.connect("clicked", self.preview, voice, preview_spinner); controls.append(preview)
             run = Gtk.Button(label="Benchmark" if provider == "local" else "Benchmark current settings")
             run.connect("clicked", self.benchmark if provider == "local" else self.confirm_companion_benchmark, model, voice); controls.append(run)
+            settings = Gtk.Button(label="Model settings…")
+            settings.connect("clicked", self.model_settings, model, model_values); controls.append(settings)
             if provider == "local":
                 reset = Gtk.Button(label="Reset", sensitive=applied > 0); reset.connect("clicked", self.reset, model["id"]); controls.append(reset)
             row.append(controls); self.rows.append(row)
@@ -661,7 +670,8 @@ class TunePage(Gtk.Box):
             dialog = Gtk.AlertDialog(message="Apply tuned profile?", detail=(
                 f"{model.get('name', model['id'])}\n" + "\n".join(metrics) +
                 "\n\nCandidates\n" + "\n".join(candidate_lines) + "\n\n"
-                "This measures performance, not voice quality, and does not change the model variant."),
+                "This measures performance, not voice quality, and does not change the model variant. "
+                "A manual thread value in Model settings remains higher priority than this tuned profile."),
                 buttons=["Keep current", "Apply"], cancel_button=0, default_button=1)
             def chosen(_dialog, task):
                 try: choice = _dialog.choose_finish(task)
@@ -713,6 +723,45 @@ class TunePage(Gtk.Box):
 
     def reset(self, _button, model_id):
         self.window.run_task(command("tuning", "reset", model_id), "Tuned profile removed", self.load)
+
+    def model_settings(self, _button, model, current):
+        dialog = Gtk.Dialog(title=f"{model.get('name', model['id'])} settings", transient_for=self.window, modal=True)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Save", Gtk.ResponseType.ACCEPT)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                          margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
+        content.append(Gtk.Label(label=("These settings apply only to this installed artifact. "
+            "Unchecked values inherit the tuned profile, global default, or automatic choice."),
+            xalign=0, wrap=True))
+        engine = model.get("engine", "").casefold(); fields = [
+            ("threads", "CPU threads", 1, 16, 1, 2),
+        ]
+        if model.get("providerId") == "local":
+            fields += [("silence_scale", "Inter-segment silence scale", 0, 2, .05, .2)]
+        if engine == "pocket": fields += [("pocket_num_steps", "Pocket refinement steps", 1, 8, 1, 3),
+                                            ("pocket_chunk_size", "Pocket decoder chunk", 1, 16, 1, 4)]
+        if engine == "zipvoice": fields += [("zipvoice_num_steps", "ZipVoice steps", 1, 8, 1, 4)]
+        if engine == "moss" or model.get("providerId") == "moss":
+            fields += [("moss_batch_frames", "MOSS batch frames", 1, 16, 1, 4)]
+        widgets = {}
+        for key, label, low, high, step, default in fields:
+            line = Gtk.Box(spacing=10); enabled = Gtk.CheckButton(label=label, hexpand=True)
+            enabled.set_active(key in current); line.append(enabled)
+            adjustment = Gtk.Adjustment(value=float(current.get(key, default)), lower=low, upper=high,
+                                        step_increment=step, page_increment=step)
+            spin = Gtk.SpinButton(adjustment=adjustment, digits=2 if isinstance(step, float) else 0)
+            spin.set_sensitive(enabled.get_active()); enabled.connect("toggled", lambda check, target=spin: target.set_sensitive(check.get_active()))
+            line.append(spin); content.append(line); widgets[key] = (enabled, spin, isinstance(step, float))
+        reset = Gtk.Button(label="Use inherited settings for this model")
+        reset.connect("clicked", lambda *_: [item[0].set_active(False) for item in widgets.values()])
+        content.append(reset); dialog.get_content_area().append(content)
+        def response(_dialog, value):
+            if value == Gtk.ResponseType.ACCEPT:
+                submitted = {key: (spin.get_value() if floating else spin.get_value_as_int())
+                             for key, (enabled, spin, floating) in widgets.items() if enabled.get_active()}
+                self.window.run_task(command("model-setting", "replace", model["id"], json.dumps(submitted)),
+                                     "Model settings saved", self.load)
+            dialog.destroy()
+        dialog.connect("response", response); dialog.present()
 
 
 class Window(Gtk.ApplicationWindow):

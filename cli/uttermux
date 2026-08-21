@@ -149,6 +149,13 @@ def render_config(doc: dict) -> str:
             if tuning.get("artifact_sha256"): lines.append(f'artifact_sha256 = {quote(tuning["artifact_sha256"])}')
             lines.append(f'protocol_version = {int(tuning.get("protocol_version", VERSION))}')
             lines.append(f'runtime_revision = {int(tuning.get("runtime_revision", TUNING_RUNTIME_REVISION))}')
+    for model_id, values in sorted(doc.get("model_overrides", {}).items()):
+        clean = {key: values[key] for key in ("threads", "silence_scale", "pocket_num_steps",
+                 "pocket_chunk_size", "zipvoice_num_steps", "moss_batch_frames") if key in values}
+        if not clean: continue
+        lines += ["", f'[model_overrides.{quote(model_id)}]']
+        for key, value in clean.items():
+            lines.append(f'{key} = {float(value) if key == "silence_scale" else int(value)}')
     providers = doc.get("providers", {})
     edge = providers.get("edge", {})
     lines += ["", "[providers.edge]", f'enabled = {str(bool(edge.get("enabled", False))).lower()}',
@@ -968,6 +975,37 @@ def cmd_tuning(args):
     atomic_write(config_path(), render_config(doc)); restart()
 
 
+MODEL_OVERRIDE_LIMITS = {
+    "threads": (1, 16, int), "silence_scale": (0.0, 2.0, float),
+    "pocket_num_steps": (1, 8, int), "pocket_chunk_size": (1, 16, int),
+    "zipvoice_num_steps": (1, 8, int), "moss_batch_frames": (1, 16, int),
+}
+
+
+def cmd_model_setting(args):
+    doc = read_config(); overrides = doc.setdefault("model_overrides", {})
+    if args.action == "list":
+        value = overrides.get(args.model, {}) if args.model else overrides
+        print(json.dumps(value, indent=2)); return
+    if not args.model: raise RuntimeError(f"model-setting {args.action} requires a model ID")
+    if args.action == "reset":
+        overrides.pop(args.model, None)
+    else:
+        try: submitted = json.loads(args.values)
+        except (TypeError, json.JSONDecodeError) as error: raise RuntimeError(f"invalid settings JSON: {error}") from None
+        if not isinstance(submitted, dict): raise RuntimeError("model settings must be a JSON object")
+        clean = {}
+        for key, value in submitted.items():
+            if key not in MODEL_OVERRIDE_LIMITS: raise RuntimeError(f"unknown model setting: {key}")
+            low, high, cast = MODEL_OVERRIDE_LIMITS[key]
+            parsed = cast(value)
+            if parsed < low or parsed > high: raise RuntimeError(f"{key} must be between {low} and {high}")
+            clean[key] = parsed
+        if clean: overrides[args.model] = clean
+        else: overrides.pop(args.model, None)
+    atomic_write(config_path(), render_config(doc)); restart()
+
+
 def GLib_find_program(name: str) -> str | None:
     """Avoid importing GTK's GLib into the command-line client."""
     return shutil.which(name)
@@ -1157,6 +1195,8 @@ def main():
     p.add_argument("--json", action="store_true"); p.add_argument("--output"); p.set_defaults(func=cmd_tune)
     p = sub.add_parser("tuning"); p.add_argument("action", choices=("list", "apply", "reset"))
     p.add_argument("model", nargs="?"); p.add_argument("threads", nargs="?", type=int); p.set_defaults(func=cmd_tuning)
+    p = sub.add_parser("model-setting"); p.add_argument("action", choices=("list", "replace", "reset"))
+    p.add_argument("model", nargs="?"); p.add_argument("values", nargs="?", default="{}"); p.set_defaults(func=cmd_model_setting)
     p = sub.add_parser("preview-url"); p.add_argument("url"); p.set_defaults(func=cmd_preview_url)
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
     p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=("edge", "elevenlabs", "grok")); p.set_defaults(func=cmd_provider)

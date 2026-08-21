@@ -217,7 +217,7 @@ Bind `uttermux speak-selection` to a desktop shortcut. It reads the current
 primary selection using `wl-paste`, `xclip`, or `xsel`. The tray menu can also
 read the selection or stop current speech.
 
-For slower-loading local models such as Kokoro, enable **Settings → Advanced →
+For slower-loading local models such as Kokoro, enable **Settings → Global defaults →
 Preload active local voice**. This spends RAM at login but removes model loading
 from the first request. It cannot remove the time the model needs to synthesize
 the first sentence.
@@ -245,7 +245,20 @@ starting point based on engine behavior and available cores/RAM, not an attempt
 to predict the fastest setting for every processor. Benchmark documents report
 the exact reference hardware and should not be read as universal tuning advice.
 
-The GUI batches all advanced changes and reloads only once.
+The GUI batches all global changes and reloads only once. To change only one
+installed artifact, open **Test & tune → Model settings**. Manual model settings
+take precedence over a saved benchmark profile; a saved profile takes precedence
+over global defaults and automatic selection. Playback buffering, model-cache
+size, language routing, and cloud caching remain global.
+
+The same controls are scriptable. Values omitted from the JSON object inherit:
+
+```sh
+uttermux model-setting replace kokoro-multi-lang-v1_1 '{"threads": 4, "silence_scale": 0.15}'
+uttermux model-setting list kokoro-multi-lang-v1_1
+uttermux model-setting reset kokoro-multi-lang-v1_1
+```
+
 MOSS has independent settings because increasing the normal sherpa thread count
 does not tune its concurrent generator/decoder pipeline.
 

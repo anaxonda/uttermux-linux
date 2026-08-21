@@ -224,6 +224,21 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(constructor.call_args.args[1]["num_threads"], 8)
         self.assertIn("kokoro@threads-8", broker.engines)
 
+    def test_manual_model_override_beats_tuning_and_global_defaults(self):
+        broker = object.__new__(self.u.Broker)
+        broker.config = {"local_threads": 2, "local_silence_scale": .2,
+            "tuning": {"models": {"kokoro": {"threads": 6}}},
+            "model_overrides": {"kokoro": {"threads": 4, "silence_scale": .1}}}
+        broker.engine_lock = threading.Lock(); broker.engines = OrderedDict()
+        broker.max_loaded_models = 2; broker.api = mock.Mock()
+        fake = mock.MagicMock(); fake.lock = threading.RLock()
+        model = {"id": "kokoro", "engine": "kokoro", "root": "/tmp", "files": {}}
+        with mock.patch.object(self.u, "SherpaEngine", return_value=fake) as constructor:
+            broker.engine(model)
+        effective = constructor.call_args.args[1]
+        self.assertEqual(effective["num_threads"], 4)
+        self.assertEqual(effective["silence_scale"], .1)
+
     def test_stale_runtime_tuning_is_ignored(self):
         broker = object.__new__(self.u.Broker)
         broker.config = {"local_threads": 2, "tuning": {"models": {"kokoro": {
