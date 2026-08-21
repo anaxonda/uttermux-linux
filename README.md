@@ -58,11 +58,35 @@ The GTK application and CLI operate on the same catalog and configuration.
 - Compatibility bridge for the existing KOReader localhost TTS plugin.
 - Cancellation without changing voices halfway through an utterance.
 
-## Local model catalog
+## Models available in the Linux app
 
-Each row is a concrete artifact present in `catalog/catalog.toml`. Downloads
-occur only after an install action. Sizes are compressed transfer sizes; RAM is
-an engineering estimate used by the UI's advisory filter, not a benchmark.
+Every row below is implemented and appears in the Linux model catalog. The app
+can install and run each artifact. ZipVoice does not expose a preset system
+voice; it becomes selectable after the user creates or imports a voice profile.
+MOSS and Qwen use maintained companion installers instead of the sherpa-onnx
+archive installer. No row in this table describes Android support.
+
+Downloads occur only after an install action. Sizes are compressed transfer
+sizes; RAM is a catalog estimate used by the UI's advisory filter, not a
+measurement on the reader's computer.
+
+### Cross-platform local support
+
+“Yes” means the released app exposes an install and synthesis path. “Profile”
+means a reference recording must be configured before a system voice exists.
+
+| Family | Linux | Android | Current boundary |
+| --- | --- | --- | --- |
+| Piper/VITS | Yes; Lessac medium in the built-in catalog | Yes; dynamic upstream catalog | Fixed voices |
+| Inflect Nano/Micro | Nano | Nano and Micro | Fixed English voices |
+| Kitten | FP16 v0.1 and INT8 v0.8 | FP16 v0.1 and INT8 v0.8 | Fixed English voices |
+| Matcha | Yes | Yes | LJSpeech + Vocos artifact |
+| Supertonic 3 | INT8 | INT8 | Multilingual styles |
+| Pocket | Yes; presets and profiles | Yes; presets and profiles | Reference-conditioned cloning |
+| Kokoro | v1.0 FP32 | v1.0 and v1.1 FP32 | INT8 and FP8 are not included |
+| ZipVoice Distill | Profile; INT8 | No | Linux requires reference audio and transcript |
+| MOSS-TTS-Nano | Companion adapter; FP32 | No | Android evaluation failed sustained-reader acceptance |
+| Qwen3-TTS 0.6B | Companion adapter; CustomVoice | No | Android runtime is not integrated |
 
 | Catalog artifact | Engine | Languages / voices exposed | Clone | Download | Est. RAM | Precision | Integration | Upstream |
 | --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |
@@ -71,17 +95,21 @@ an engineering estimate used by the UI's advisory filter, not a benchmark.
 | `kitten-nano-en-v0_8-int8` | Kitten | English; 8 | No | 30 MiB | 180 MiB | INT8 | sherpa-onnx C API | [KittenTTS](https://github.com/KittenML/KittenTTS) |
 | `vits-piper-en_US-lessac-medium` | Piper/VITS | English; 1 | No | 64 MiB | 180 MiB | FP32 | sherpa-onnx C API | [Piper](https://github.com/OHF-Voice/piper1-gpl) |
 | `matcha-icefall-en_US-ljspeech` | Matcha + Vocos | English; 1 | No | 77 MiB | 320 MiB | FP32 | sherpa-onnx C API | [Matcha-TTS](https://github.com/shivammehta25/Matcha-TTS) |
-| `sherpa-onnx-supertonic-3-tts-int8-2026-05-11` | Supertonic 3 | Multilingual; 10 styles | No | 129 MiB | 420 MiB | INT8 | sherpa-onnx C API | [Supertonic](https://github.com/supertone-inc/supertonic) |
+| `sherpa-onnx-supertonic-3-tts-int8-2026-05-11` | Supertonic 3 | `en-US` catalog metadata; 10 styles; multilingual model | No | 129 MiB | 420 MiB | INT8 | sherpa-onnx C API | [Supertonic](https://github.com/supertone-inc/supertonic) |
 | `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` | ZipVoice Distill | English/Chinese; user profiles | Yes | 156 MiB | 650 MiB | INT8 | sherpa-onnx C API | [ZipVoice](https://github.com/k2-fsa/ZipVoice) |
 | `sherpa-onnx-pocket-tts-int8-2026-01-26` | Pocket | English; 4 presets + profiles | Yes | 176 MiB | 420 MiB | INT8 | sherpa-onnx C API | [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) |
-| `kokoro-multi-lang-v1_0` | Kokoro 82M | English/Chinese; 53 upstream, 6 named in catalog | No | 333 MiB | 560 MiB | FP32 | sherpa-onnx C API | [Kokoro in sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/kokoro.html) |
+| `kokoro-multi-lang-v1_0` | Kokoro 82M | English metadata; 6 catalog voices; artifact contains 53 speakers | No | 333 MiB | 560 MiB | FP32 | sherpa-onnx C API | [Kokoro in sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/kokoro.html) |
 | `moss-tts-nano-100m-onnx` | MOSS Nano | 20 languages; preset references | No | 728 MiB | 1.4 GiB | FP32 | external persistent ONNX adapter | [MOSS-TTS-Nano](https://github.com/OpenMOSS/MOSS-TTS-Nano) |
 | `qwen3-tts-0.6b-customvoice` | Qwen3-TTS | 10 languages; 9 built-in voices | No | ~2.4 GiB | 3 GiB | runtime INT8 | external persistent C++ adapter | [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) |
 
-Kokoro INT8 v1.1 exists upstream, but it is not in this Linux catalog. FP8 is
-not supported by the current CPU-only ONNX execution path and is therefore not
-listed as a runnable variant. A distinct artifact is added only after its files,
-runtime configuration, checksum, license, and synthesis path are tested.
+## Model variants not included in the Linux app
+
+Kokoro v1.1 INT8 is published upstream but has no UtterMux Linux catalog entry.
+UtterMux also has no tested Kokoro FP8 artifact or FP8 runtime configuration.
+That is an implementation status, not a claim that FP8 cannot run on other
+hardware or through another ONNX Runtime execution provider. A new artifact is
+added only after its model files, execution provider, runtime configuration,
+checksum, license, and synthesis path are verified together.
 
 ## Online providers
 
@@ -209,9 +237,9 @@ The manager combines those fields with detected CPU features and available
 memory and labels each artifact **Recommended here**, **Likely usable**, **May
 be slow**, or with a memory warning. Those labels are deterministic heuristics
 derived from logical CPU count, available RAM, catalog RAM estimates, and the
-catalog performance class. They are not benchmark results. This build exposes
-only the CPU execution provider; it does not claim GPU acceleration. Labels do
-not download, disable, or hide artifacts.
+catalog performance class. They are not benchmark results. The current Linux
+release configures ONNX Runtime's CPU execution provider and does not implement
+GPU selection. Labels do not download, disable, or hide artifacts.
 
 Inspect the non-identifying local capability report with:
 
