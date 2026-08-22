@@ -62,4 +62,4 @@ jobs:
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
       - run: DESTDIR="$PWD/stage" cmake --install build
-      - run: test -x stage/usr/local/lib/speech-dispatcher-modules/sd_uttermux
+      - run: test -x stage/usr/lib/speech-dispatcher-modules/sd_uttermux
