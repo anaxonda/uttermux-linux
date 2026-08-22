@@ -30,6 +30,11 @@ install_arch_package() {
   sudo pacman -U --needed --noconfirm "${overwrite_args[@]}" "$archive"
 }
 
+refresh_user_services() {
+  systemctl --user daemon-reload
+  systemctl --user restart uttermux.service uttermux-tray.service
+}
+
 if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
   printf '%s\n' 'Run this installer as your normal user; it invokes sudo only when installation is required.' >&2
   exit 2
@@ -80,6 +85,7 @@ if [[ $machine == x86_64 && ${UTTERMUX_FORCE_SOURCE:-0} != 1 ]]; then
     fi
     install_arch_package "$work/$package"
     uttermux setup
+    refresh_user_services
     uttermux doctor
     printf '%s\n' 'UtterMux is installed. Restart applications that cache system voice lists.'
     exit 0
@@ -112,5 +118,6 @@ fi
 )
 
 uttermux setup
+refresh_user_services
 uttermux doctor
 printf '%s\n' 'UtterMux is installed. Restart Firefox and Zotero before selecting its voices.'

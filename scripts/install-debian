@@ -2,6 +2,11 @@
 set -euo pipefail
 
 repo=https://github.com/anaxonda/uttermux-linux
+refresh_user_services() {
+  systemctl --user daemon-reload
+  systemctl --user restart uttermux.service uttermux-tray.service
+}
+
 if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
   printf '%s\n' 'Run this installer as your normal user; it invokes sudo for packages and installation.' >&2
   exit 2
@@ -31,6 +36,7 @@ if [[ $machine == amd64 && ${UTTERMUX_FORCE_SOURCE:-0} != 1 ]]; then
     sudo apt-get update
     sudo apt-get install -y "$work/$package"
     uttermux setup
+    refresh_user_services
     uttermux doctor
     printf '%s\n' 'UtterMux is installed. Restart applications that cache system voice lists.'
     exit 0

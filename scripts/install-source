@@ -84,5 +84,7 @@ python3 -m pip install --disable-pip-version-check --no-deps --target "$work/ven
 sudo cp -a "$work/vendor/." "$vendor/"
 
 uttermux setup
+systemctl --user daemon-reload
+systemctl --user restart uttermux.service uttermux-tray.service
 uttermux doctor
 printf '%s\n' 'UtterMux is installed. Restart applications that cache system voice lists.'
