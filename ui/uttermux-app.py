@@ -490,6 +490,10 @@ class SettingsPage(Gtk.Box):
         box.append(self.setting_row("Warm local models", "0 = Automatic: one below 8 GiB RAM, otherwise two. A positive value overrides it.", self.model_cache))
         self.audio_cache = Gtk.SpinButton.new_with_range(0, 1024, 16)
         box.append(self.setting_row("Cloud audio cache (MB)", "Zero disables reuse; cached utterances avoid repeat API calls.", self.audio_cache))
+        self.online_tail = Gtk.SpinButton.new_with_range(0, 1000, 10)
+        box.append(self.setting_row("Online trailing-silence window", "Maximum milliseconds inspected at the end of API audio. Zero disables trimming; recommended: 300.", self.online_tail))
+        self.online_boundary = Gtk.SpinButton.new_with_range(0, 300, 10)
+        box.append(self.setting_row("Online sentence boundary", "Milliseconds of quiet audio retained after the final audible sample. Recommended: 40.", self.online_boundary))
         box.append(Gtk.Separator())
         language_heading = Gtk.Label(label="Language routing", xalign=0); language_heading.add_css_class("heading")
         box.append(language_heading)
@@ -550,6 +554,8 @@ class SettingsPage(Gtk.Box):
         self.external_idle.set_value(playback.get("externalIdleSeconds", {}).get("value", 120))
         self.model_cache.set_value(playback.get("maxLoadedModels", {}).get("value", 0))
         self.audio_cache.set_value(playback.get("audioCacheMb", {}).get("value", 64))
+        self.online_tail.set_value(playback.get("onlineTrailingSilenceMs", {}).get("value", 300))
+        self.online_boundary.set_value(playback.get("onlineBoundarySilenceMs", {}).get("value", 40))
         self.language_characters.set_value(playback.get("languageMinimumCharacters", {}).get("value", 40))
         self.language_confidence.set_value(playback.get("languageMinimumConfidence", {}).get("value", .8))
         self.cross_language.set_active(bool(playback.get("crossLanguageFallback", {}).get("value", True)))
@@ -584,6 +590,8 @@ class SettingsPage(Gtk.Box):
                       ("external-idle-seconds", self.external_idle.get_value_as_int()),
                       ("max-loaded-models", self.model_cache.get_value_as_int()),
                       ("audio-cache-mb", self.audio_cache.get_value_as_int()),
+                      ("online-trailing-silence-ms", self.online_tail.get_value_as_int()),
+                      ("online-boundary-silence-ms", self.online_boundary.get_value_as_int()),
                       ("language-minimum-characters", self.language_characters.get_value_as_int()),
                       ("language-minimum-confidence", self.language_confidence.get_value()))
             results = [subprocess.run(command("setting", name, str(value), "--defer-restart"), text=True, capture_output=True)

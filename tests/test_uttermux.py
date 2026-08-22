@@ -1,4 +1,5 @@
 import importlib.util
+from array import array
 import ctypes
 import io
 import json
@@ -150,6 +151,28 @@ class ProtocolTests(unittest.TestCase):
         broker._synthesize_voice = lambda _voice, _text, speed, _language, _emit, _cancelled: speeds.append(speed)
         broker.synthesize("edge/libby", "Hello", 1.2, lambda _raw: None, threading.Event(), "en-US")
         self.assertEqual(speeds, [1.5])
+
+    def test_online_pcm_tail_filter_removes_silence_and_keeps_boundary(self):
+        emitted = []
+        filter_ = self.u.TrailingPcmFilter(emitted.append, threading.Event(),
+                                           max_ms=100, keep_ms=10, threshold=48)
+        filter_(self.u.packet(self.u.AUDIO_START, 0, struct.pack("<IB", 1000, 2)))
+        filter_(self.u.packet(self.u.AUDIO, 0, array("h", [500] * 20 + [0] * 80).tobytes()))
+        filter_.finish()
+        output = b"".join(raw[self.u.HEADER.size:] for raw in emitted
+                          if self.u.HEADER.unpack_from(raw)[2] == self.u.AUDIO)
+        result = array("h"); result.frombytes(output)
+        self.assertEqual(len(result), 30)
+        self.assertEqual(list(result[-10:]), [0] * 10)
+
+    def test_online_pcm_tail_filter_drops_cancelled_tail(self):
+        emitted = []; cancelled = threading.Event()
+        filter_ = self.u.TrailingPcmFilter(emitted.append, cancelled, max_ms=100)
+        filter_(self.u.packet(self.u.AUDIO_START, 0, struct.pack("<IB", 1000, 2)))
+        filter_(self.u.packet(self.u.AUDIO, 0, array("h", [500] * 10).tobytes()))
+        cancelled.set(); filter_.finish()
+        self.assertEqual([self.u.HEADER.unpack_from(raw)[2] for raw in emitted],
+                         [self.u.AUDIO_START])
 
     def test_grok_uses_provider_auto_language_and_pcm(self):
         voice_response = mock.MagicMock()

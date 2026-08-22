@@ -175,6 +175,8 @@ def render_config(doc: dict) -> str:
     lines = ["schema_version = 2", f'max_loaded_models = {int(doc.get("max_loaded_models", 0))}',
              f'audio_cache_mb = {int(doc.get("audio_cache_mb", 64))}',
              f'playback_speed = {float(doc.get("playback_speed", 1.0))}',
+             f'online_trailing_silence_ms = {int(doc.get("online_trailing_silence_ms", 300))}',
+             f'online_boundary_silence_ms = {int(doc.get("online_boundary_silence_ms", 40))}',
              f'local_threads = {int(doc.get("local_threads", 0))}',
              f'pocket_threads = {int(doc.get("pocket_threads", 0))}',
              f'local_silence_scale = {float(doc.get("local_silence_scale", .2))}',
@@ -257,6 +259,8 @@ def setup(_args):
     doc.setdefault("max_loaded_models", 0)
     doc.setdefault("local_threads", 0)
     doc.setdefault("pocket_threads", 0)
+    doc.setdefault("online_trailing_silence_ms", 300)
+    doc.setdefault("online_boundary_silence_ms", 40)
     doc.setdefault("local_silence_scale", .2)
     doc.setdefault("pocket_num_steps", 3)
     doc.setdefault("pocket_chunk_size", 4)
@@ -591,6 +595,10 @@ def cmd_settings_schema(_args):
                             "value": int(document.get("max_loaded_models", 0))},
         "audioCacheMb": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64,
                          "value": int(document.get("audio_cache_mb", 64))},
+        "onlineTrailingSilenceMs": {"type": "integer", "minimum": 0, "maximum": 1000, "default": 300,
+                                    "value": int(document.get("online_trailing_silence_ms", 300))},
+        "onlineBoundarySilenceMs": {"type": "integer", "minimum": 0, "maximum": 300, "default": 40,
+                                    "value": int(document.get("online_boundary_silence_ms", 40))},
         "localThreads": {"type": "integer", "minimum": 0, "maximum": 16, "default": 0,
                          "value": int(document.get("local_threads", 0))},
         "pocketThreads": {"type": "integer", "minimum": 0, "maximum": 16, "default": 0,
@@ -841,6 +849,10 @@ def cmd_setting(args):
         doc["audio_cache_mb"] = max(0, min(1024, int(args.value)))
     elif args.name == "playback-speed":
         doc["playback_speed"] = max(.5, min(2.0, float(args.value)))
+    elif args.name == "online-trailing-silence-ms":
+        doc["online_trailing_silence_ms"] = max(0, min(1000, int(args.value)))
+    elif args.name == "online-boundary-silence-ms":
+        doc["online_boundary_silence_ms"] = max(0, min(300, int(args.value)))
     elif args.name == "local-threads":
         doc["local_threads"] = max(0, min(16, 0 if args.value.casefold() == "auto" else int(args.value)))
     elif args.name == "pocket-threads":
@@ -1402,6 +1414,7 @@ def main():
     p = sub.add_parser("provider-default"); p.add_argument("provider", choices=ONLINE_PROVIDERS); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
     p = sub.add_parser("favorite"); p.add_argument("action", choices=("list", "add", "remove")); p.add_argument("voice", nargs="?"); p.set_defaults(func=cmd_favorite)
     p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb", "playback-speed",
+        "online-trailing-silence-ms", "online-boundary-silence-ms",
         "local-threads", "pocket-threads", "local-silence-scale", "pocket-num-steps", "pocket-chunk-size",
         "zipvoice-num-steps", "moss-threads", "moss-batch-frames",
         "external-idle-seconds",

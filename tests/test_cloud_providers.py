@@ -103,6 +103,8 @@ class CloudProviderTests(unittest.TestCase):
             deepgram.synthesize("deepgram/aura-2-thalia-en", "Text", 3.0,
                                 lambda _raw: None, threading.Event(), "en-US")
             self.assertIn("speed=1.5", deep_send.call_args.args[0])
+            self.assertIn("container=none", deep_send.call_args.args[0])
+            self.assertNotIn("encoded", deep_send.call_args.kwargs)
             play.synthesize("playht/default", "Texte", 9.0,
                             lambda _raw: None, threading.Event(), "fr-FR")
             self.assertEqual(play_send.call_args.kwargs["data"]["speed"], 5)

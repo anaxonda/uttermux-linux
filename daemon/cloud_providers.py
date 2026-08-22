@@ -7,6 +7,7 @@ routing, caching, and Speech Dispatcher framing remain in uttermuxd.
 from __future__ import annotations
 
 import base64
+import asyncio
 import datetime
 import hashlib
 import hmac
@@ -19,6 +20,9 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
+
+import aiohttp
 
 MAGIC = 0x58544D55
 HEADER = struct.Struct("<IHHQI")
@@ -429,11 +433,10 @@ class DeepgramProvider(Provider):
 
     def synthesize(self, voice_id, text, speed, emit, cancelled, language=""):
         query = urllib.parse.urlencode({"model": self.external(voice_id), "encoding": "linear16",
-                                        "sample_rate": 24000, "container": "wav",
+                                        "sample_rate": 24000, "container": "none",
                                         "speed": max(.7, min(1.5, speed))})
         self.stream("https://api.deepgram.com/v1/speak?" + query, emit, cancelled,
-                    data={"text": text}, headers={"Authorization": "Token " + self.require("api_key")},
-                    encoded=True)
+                    data={"text": text}, headers={"Authorization": "Token " + self.require("api_key")})
 
 
 class CartesiaProvider(Provider):
@@ -441,6 +444,17 @@ class CartesiaProvider(Provider):
     defaults = (voice("694f9389-aac1-45b6-b726-9d9369183238@en-US", "Default", "en-US", id, model,
                       ("en", "fr", "de", "es", "pt", "zh", "ja", "ko")),)
     headers_version = "2026-03-01"
+
+    def __init__(self, config):
+        self.transport = str(config.get("transport", "websocket")).lower()
+        self._ws = None
+        self._session = None
+        self._ws_lock = threading.Lock()
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(target=self._loop.run_forever,
+                                             name="cartesia-websocket", daemon=True)
+        self._loop_thread.start()
+        super().__init__(config)
 
     def headers(self):
         return {"X-API-Key": self.require("api_key"),
@@ -469,12 +483,79 @@ class CartesiaProvider(Provider):
 
     def synthesize(self, voice_id, text, speed, emit, cancelled, language=""):
         body = {"model_id": self.value("model", "sonic-3"), "transcript": text,
-                "voice": {"id": self.external(voice_id)},
+                "voice": {"mode": "id", "id": self.external(voice_id)},
                 "language": (language or "en").split("-", 1)[0],
                 "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": 24000},
                 "generation_config": {"speed": max(.6, min(1.5, speed))}}
+        if self.transport != "rest":
+            started = False
+            def tracked(raw):
+                nonlocal started
+                started = started or HEADER.unpack_from(raw)[2] in (AUDIO_START, AUDIO)
+                emit(raw)
+            try:
+                with self._ws_lock:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._synthesize_websocket(body, tracked, cancelled), self._loop)
+                    future.result(timeout=120)
+                return
+            except Exception:
+                if started or cancelled.is_set():
+                    raise
         self.stream("https://api.cartesia.ai/tts/bytes", emit, cancelled,
                     data=body, headers=self.headers())
+
+    async def _synthesize_websocket(self, body, emit, cancelled):
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        if self._ws is None or self._ws.closed:
+            self._ws = await self._session.ws_connect(
+                "wss://api.cartesia.ai/tts/websocket?" +
+                urllib.parse.urlencode({"cartesia_version": self.headers_version}),
+                headers={"X-API-Key": self.require("api_key")}, heartbeat=30)
+        ws = self._ws
+        context = uuid.uuid4().hex
+        request_body = dict(body)
+        request_body.update(context_id=context, continue_=False)
+        # `continue` is a protocol keyword, not Python's spelling.
+        request_body["continue"] = request_body.pop("continue_")
+        await ws.send_json(request_body)
+        started = False
+        cancelling = False
+        try:
+            while True:
+                if cancelled.is_set() and not cancelling:
+                    await ws.send_json({"context_id": context, "cancel": True})
+                    cancelling = True
+                try:
+                    message = await asyncio.wait_for(ws.receive(), timeout=.1)
+                except TimeoutError:
+                    continue
+                if message.type == aiohttp.WSMsgType.TEXT:
+                    event = json.loads(message.data)
+                    if event.get("context_id") != context:
+                        continue
+                    if event.get("type") == "chunk" and event.get("data") and not cancelling:
+                        chunk = base64.b64decode(event["data"], validate=True)
+                        if chunk:
+                            if not started:
+                                emit(packet(AUDIO_START, 0, struct.pack("<IB", 24000, 2)))
+                                started = True
+                            for offset in range(0, len(chunk), 32768):
+                                emit(packet(AUDIO, 0, chunk[offset:offset + 32768]))
+                    if event.get("type") == "error":
+                        raise RuntimeError("Cartesia WebSocket: " + str(event.get("message", "unknown error")))
+                    if event.get("done"):
+                        if not started and not cancelling:
+                            raise RuntimeError("Cartesia returned no WebSocket audio")
+                        return
+                elif message.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE,
+                                      aiohttp.WSMsgType.ERROR):
+                    raise RuntimeError("Cartesia WebSocket closed before audio completed")
+        except Exception:
+            await ws.close()
+            self._ws = None
+            raise
 
 
 class PlayHtProvider(Provider):

@@ -29,6 +29,7 @@ from typing import Callable
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import wave
 
 import aiohttp
@@ -164,6 +165,56 @@ def packet(kind: int, request_id: int, payload: bytes = b"") -> bytes:
     if len(payload) + HEADER.size > MAX_PACKET:
         raise ValueError("UtterMux packet is too large")
     return HEADER.pack(MAGIC, VERSION, kind, request_id, len(payload)) + payload
+
+
+class TrailingPcmFilter:
+    """Hold a small PCM tail and remove only near-digital terminal silence."""
+
+    def __init__(self, emit, cancelled, max_ms=300, keep_ms=40, threshold=48):
+        self.emit = emit
+        self.cancelled = cancelled
+        self.max_ms = max(0, int(max_ms))
+        self.keep_ms = max(0, int(keep_ms))
+        self.threshold = max(0, int(threshold))
+        self.sample_rate = 0
+        self.sample_width = 0
+        self.tail = bytearray()
+
+    def __call__(self, raw):
+        _magic, _version, kind, _request_id, _size = HEADER.unpack_from(raw)
+        payload = raw[HEADER.size:]
+        if kind == AUDIO_START:
+            self.sample_rate, sample_format = struct.unpack_from("<IB", payload)
+            self.sample_width = {1: 4, 2: 2}.get(sample_format, 0)
+            self.emit(raw)
+            return
+        if kind != AUDIO or self.sample_width != 2 or not self.max_ms:
+            self.emit(raw)
+            return
+        self.tail.extend(payload)
+        capacity = self.sample_rate * self.sample_width * self.max_ms // 1000
+        capacity -= capacity % self.sample_width
+        if len(self.tail) > capacity:
+            count = len(self.tail) - capacity
+            count -= count % self.sample_width
+            if count:
+                self.emit(packet(AUDIO, 0, bytes(self.tail[:count])))
+                del self.tail[:count]
+
+    def finish(self):
+        if not self.tail or self.cancelled.is_set():
+            return
+        usable = len(self.tail) - len(self.tail) % 2
+        samples = array("h")
+        samples.frombytes(self.tail[:usable])
+        last_audible = next((index for index in range(len(samples) - 1, -1, -1)
+                             if abs(samples[index]) >= self.threshold), -1)
+        keep_samples = self.sample_rate * self.keep_ms // 1000
+        end = min(len(samples), max(0, last_audible + 1 + keep_samples))
+        payload = samples[:end].tobytes()
+        if payload:
+            self.emit(packet(AUDIO, 0, payload))
+        self.tail.clear()
 
 
 def unpack(raw: bytes) -> tuple[int, int, bytes]:
@@ -539,6 +590,15 @@ class ElevenLabsProvider:
         defaults = (ELEVEN_FLASH_LANGUAGES
                     if self.model in {"eleven_flash_v2_5", "eleven_turbo_v2_5"} else ("en",))
         self.languages = tuple(normalize_language(x) for x in config.get("languages", defaults))
+        self.transport = str(config.get("transport", "websocket")).lower()
+        self._ws = None
+        self._ws_key = None
+        self._session = None
+        self._ws_lock = threading.Lock()
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(target=self._loop.run_forever,
+                                             name="elevenlabs-websocket", daemon=True)
+        self._loop_thread.start()
         self._voices = {voice["id"]: voice for voice in config.get("voices", [])}
         self._refresh_voices()
 
@@ -581,12 +641,32 @@ class ElevenLabsProvider:
         external_id = voice_id.removeprefix("elevenlabs/")
         if external_id not in self._voices:
             raise ValueError(f"unknown ElevenLabs voice: {voice_id}")
+        selected_speed = max(.7, min(1.2, speed))
+        selected_language = language.split("-", 1)[0] if language else ""
+        if self.transport != "rest":
+            started = False
+            def tracked(raw):
+                nonlocal started
+                started = started or HEADER.unpack_from(raw)[2] in (AUDIO_START, AUDIO)
+                emit(raw)
+            try:
+                with self._ws_lock:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._synthesize_websocket(external_id, text, selected_speed,
+                                                   selected_language, tracked, cancelled), self._loop)
+                    future.result(timeout=120)
+                return
+            except Exception:
+                if started or cancelled.is_set():
+                    raise
+                # A retry is safe only while the caller has received no audio.
+
         url = (f"https://api.elevenlabs.io/v1/text-to-speech/{external_id}/stream"
                "?output_format=pcm_24000")
         request_body = {"text": text, "model_id": self.model,
-                        "voice_settings": {"speed": max(.7, min(1.2, speed))}}
-        if language:
-            request_body["language_code"] = language.split("-", 1)[0]
+                        "voice_settings": {"speed": selected_speed}}
+        if selected_language:
+            request_body["language_code"] = selected_language
         body = json.dumps(request_body).encode()
         request = urllib.request.Request(url, data=body, method="POST", headers={
             "xi-api-key": self.api_key, "Content-Type": "application/json", "Accept": "audio/pcm"})
@@ -605,6 +685,67 @@ class ElevenLabsProvider:
         except urllib.error.HTTPError as error:
             detail = error.read(2048).decode("utf-8", "replace")
             raise RuntimeError(f"ElevenLabs HTTP {error.code}: {detail}") from None
+
+    async def _synthesize_websocket(self, voice, text, speed, language, emit, cancelled):
+        key = (voice, self.model, language)
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        if self._ws is None or self._ws.closed or self._ws_key != key:
+            if self._ws is not None and not self._ws.closed:
+                await self._ws.close()
+            query = {"model_id": self.model, "output_format": "pcm_24000",
+                     "auto_mode": "true", "inactivity_timeout": 180}
+            if language:
+                query["language_code"] = language
+            self._ws = await self._session.ws_connect(
+                f"wss://api.elevenlabs.io/v1/text-to-speech/{voice}/multi-stream-input?" +
+                urllib.parse.urlencode(query), headers={"xi-api-key": self.api_key}, heartbeat=30)
+            self._ws_key = key
+        ws = self._ws
+        context = uuid.uuid4().hex
+        await ws.send_json({"context_id": context, "text": text,
+                            "voice_settings": {"speed": speed}})
+        await ws.send_json({"context_id": context, "flush": True})
+        await ws.send_json({"context_id": context, "close_context": True})
+        started = False
+        closing = False
+        try:
+            while True:
+                if cancelled.is_set() and not closing:
+                    await ws.send_json({"context_id": context, "close_context": True})
+                    closing = True
+                try:
+                    message = await asyncio.wait_for(ws.receive(), timeout=.1)
+                except TimeoutError:
+                    continue
+                if message.type == aiohttp.WSMsgType.TEXT:
+                    event = json.loads(message.data)
+                    event_context = event.get("contextId") or event.get("context_id")
+                    if event_context != context:
+                        continue
+                    if event.get("audio") and not closing:
+                        chunk = base64.b64decode(event["audio"], validate=True)
+                        if chunk:
+                            if not started:
+                                emit(packet(AUDIO_START, 0, struct.pack("<IB", 24000, 2)))
+                                started = True
+                            max_payload = MAX_PACKET - HEADER.size
+                            for offset in range(0, len(chunk), max_payload):
+                                emit(packet(AUDIO, 0, chunk[offset:offset + max_payload]))
+                    if event.get("isFinal") or event.get("is_final"):
+                        if not started and not closing:
+                            raise RuntimeError("ElevenLabs returned no WebSocket audio")
+                        return
+                    if event.get("error"):
+                        raise RuntimeError("ElevenLabs WebSocket: " + str(event["error"]))
+                elif message.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE,
+                                      aiohttp.WSMsgType.ERROR):
+                    raise RuntimeError("ElevenLabs WebSocket closed before audio completed")
+        except Exception:
+            await ws.close()
+            self._ws = None
+            self._ws_key = None
+            raise
 
 
 class GrokProvider:
@@ -1298,7 +1439,11 @@ class Broker:
             emit(raw)
 
         try:
-            provider.synthesize(voice_id, text, speed, tracked, cancelled, language)
+            tail_filter = TrailingPcmFilter(
+                tracked, cancelled, self.config.get("online_trailing_silence_ms", 300),
+                self.config.get("online_boundary_silence_ms", 40))
+            provider.synthesize(voice_id, text, speed, tail_filter, cancelled, language)
+            tail_filter.finish()
             if use_cache and captured and not cancelled.is_set() and self.audio_cache_limit:
                 size = sum(map(len, captured))
                 if size <= self.audio_cache_limit:
