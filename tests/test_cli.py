@@ -26,6 +26,16 @@ profiles = importlib.util.module_from_spec(profile_spec); profile_loader.exec_mo
 
 
 class CliTests(unittest.TestCase):
+    def test_selection_prefers_owned_media_player(self):
+        first = mock.MagicMock(); first.__enter__.return_value.read.return_value = b"handle"
+        second = mock.MagicMock()
+        with mock.patch.object(ut.shutil, "which", side_effect=lambda name: "/usr/bin/wl-paste" if name == "wl-paste" else None), \
+             mock.patch.object(ut.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="Selected text")) as run, \
+             mock.patch("urllib.request.urlopen", side_effect=[first, second]) as open_url:
+            ut.cmd_selection(argparse.Namespace(clipboard=False, language=""))
+        self.assertEqual(open_url.call_count, 2)
+        self.assertEqual(run.call_count, 1)
+
     def test_directory_size_does_not_follow_links(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory); model = base / "model"; outside = base / "outside"

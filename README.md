@@ -160,6 +160,9 @@ uttermux doctor
 Bind `uttermux speak-selection` to a desktop shortcut. It reads the Wayland or
 X11 primary selection through `wl-paste`, `xclip`, or `xsel`; add `--clipboard`
 to use the clipboard instead.
+When the local playback service is enabled, selection audio is exposed through
+MPRIS for desktop play/pause/stop controls; otherwise it falls back to Speech
+Dispatcher.
 
 ### Routing and performance
 

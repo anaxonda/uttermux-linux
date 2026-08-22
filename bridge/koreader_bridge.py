@@ -26,6 +26,7 @@ CACHE: OrderedDict[str, "Audio"] = OrderedDict()
 LOCK = threading.Lock()
 ACTIVE_AUDIO = None
 MEDIA = None
+CURRENT_HANDLE = None
 
 
 class MediaSession:
@@ -233,6 +234,7 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(result, "application/json")
 
     def do_POST(self):
+        global CURRENT_HANDLE
         try:
             data = self.json()
             if self.path == "/":
@@ -244,8 +246,12 @@ class Handler(BaseHTTPRequestHandler):
                     CACHE.move_to_end(key)
                     while len(CACHE) > 20: CACHE.popitem(last=False)[1].stop()
                 self.reply(key)
-            elif self.path == "/play": CACHE[data["handle"]].play(); self.reply("")
-            elif self.path == "/stop": CACHE[data["handle"]].stop(); self.reply("")
+            elif self.path == "/play":
+                CURRENT_HANDLE = data["handle"]; CACHE[CURRENT_HANDLE].play(); self.reply("")
+            elif self.path == "/stop":
+                handle = data.get("handle") or CURRENT_HANDLE
+                if handle and handle in CACHE: CACHE[handle].stop(reset=True)
+                self.reply("")
             elif self.path == "/remaining":
                 started, remaining = CACHE[data["handle"]].remaining(); self.reply({"started": started, "remaining": remaining}, "application/json")
             else: self.send_error(404)

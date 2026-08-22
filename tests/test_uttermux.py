@@ -353,5 +353,13 @@ class ProtocolTests(unittest.TestCase):
         media.update.assert_has_calls([mock.call("Playing"), mock.call("Paused"), mock.call("Stopped")])
         self.assertEqual(audio.position, 0.0)
 
+    def test_koreader_stop_without_handle_stops_current_audio(self):
+        bridge = load_bridge(); bridge.CURRENT_HANDLE = "current"
+        audio = mock.MagicMock(); bridge.CACHE["current"] = audio
+        handler = object.__new__(bridge.Handler)
+        handler.path = "/stop"; handler.json = mock.Mock(return_value={}); handler.reply = mock.Mock()
+        handler.do_POST()
+        audio.stop.assert_called_once_with(reset=True)
+
 
 if __name__ == "__main__": unittest.main()

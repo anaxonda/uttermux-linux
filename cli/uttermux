@@ -1280,6 +1280,22 @@ def cmd_selection(args):
                 result = subprocess.run(command, text=True, capture_output=True)
                 if result.returncode == 0 and result.stdout.strip(): text = result.stdout; break
     if not text: raise RuntimeError("no readable selection found (install wl-clipboard, xclip, or xsel)")
+    # Prefer the owned player: it supplies truthful MPRIS state and can resume
+    # after a desktop media-key pause. Speech Dispatcher remains the fallback
+    # when the optional local player service is disabled.
+    try:
+        from urllib.request import Request, urlopen
+        request = Request("http://127.0.0.1:5000/", data=json.dumps({
+            "text": text, "voice": "", "length_scale": 1.0}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(request, timeout=180.0) as response:
+            handle = response.read().decode().strip()
+        request = Request("http://127.0.0.1:5000/play", data=json.dumps({
+            "handle": handle}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(request, timeout=3.0): pass
+        return
+    except (OSError, ValueError, TimeoutError):
+        pass
     command = ["spd-say", "-o", "uttermux"]
     default_id = read_config().get("default_voice", "")
     selected = next((record for record in voice_records() if record["id"] == default_id), None)
