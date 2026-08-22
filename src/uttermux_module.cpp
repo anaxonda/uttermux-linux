@@ -9,12 +9,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <signal.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -32,6 +35,7 @@ std::mutex state_mutex, send_mutex;
 std::thread worker;
 std::atomic<uint64_t> current_request{0};
 std::atomic<bool> stopped{false}, paused{false};
+std::atomic<pid_t> player_pid{-1};
 uint64_t next_request = 10;
 
 char *copy(const std::string &text) { return ::strdup(text.c_str()); }
@@ -85,10 +89,35 @@ const BrokerVoice *resolve_voice(const std::string &name) {
 
 void output_pcm(const std::vector<int16_t> &pcm, int sample_rate) {
   if (pcm.empty()) return;
-  AudioTrack track{}; track.bits = 16; track.num_channels = 1; track.sample_rate = sample_rate;
-  track.num_samples = static_cast<int>(pcm.size());
-  track.samples = const_cast<int16_t *>(pcm.data());
-  module_tts_output_server(&track, SPD_AUDIO_LE);
+  const std::string rate_argument = "--rate=" + std::to_string(sample_rate);
+  int input[2];
+  if (::pipe(input) != 0) throw std::runtime_error("cannot create audio pipe");
+  pid_t child = ::fork();
+  if (child < 0) {
+    ::close(input[0]); ::close(input[1]);
+    throw std::runtime_error("cannot start paplay");
+  }
+  if (child == 0) {
+    ::dup2(input[0], STDIN_FILENO); ::close(input[0]); ::close(input[1]);
+    ::execlp("paplay", "paplay", "--raw", "--format=s16le", "--channels=1",
+             rate_argument.c_str(), "--stream-name=UtterMux", static_cast<char *>(nullptr));
+    _exit(127);
+  }
+  ::close(input[0]); player_pid.store(child);
+  const auto *bytes = reinterpret_cast<const uint8_t *>(pcm.data());
+  size_t remaining = pcm.size() * sizeof(int16_t);
+  while (remaining && !stopped.load()) {
+    ssize_t written = ::write(input[1], bytes, remaining);
+    if (written > 0) { bytes += written; remaining -= static_cast<size_t>(written); }
+    else if (written < 0 && errno == EINTR) continue;
+    else break;
+  }
+  ::close(input[1]);
+  int status = 0;
+  while (::waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+  player_pid.compare_exchange_strong(child, -1);
+  if (!stopped.load() && (!WIFEXITED(status) || WEXITSTATUS(status) != 0))
+    throw std::runtime_error("paplay failed");
 }
 
 void speak_worker(std::string text, std::string voice_id, std::string language,
@@ -97,6 +126,10 @@ void speak_worker(std::string text, std::string voice_id, std::string language,
   int sample_rate = 0;
   uint8_t sample_format = 1;
   std::unique_ptr<sdsherpa::AudioProcessor> processor;
+  std::vector<int16_t> utterance_pcm;
+  auto append_pcm = [&](std::vector<int16_t> pcm) {
+    utterance_pcm.insert(utterance_pcm.end(), pcm.begin(), pcm.end());
+  };
   try {
     auto payload = fields({voice_id, std::to_string(sdsherpa::rate_to_speed(rate)), text, language});
     if (!send_locked(Message::Synthesize, request, payload.data(), payload.size())) {
@@ -117,14 +150,13 @@ void speak_worker(std::string text, std::string voice_id, std::string language,
         if (sample_format != 1 && sample_format != 2) throw std::runtime_error("unsupported PCM format");
         if (sample_rate < 8000 || sample_rate > 192000) throw std::runtime_error("invalid sample rate");
         processor = std::make_unique<sdsherpa::AudioProcessor>(sample_rate, pitch, volume);
-        module_report_event_begin(); began = true;
       } else if (response.type == Message::Audio) {
         if (!processor) throw std::runtime_error("PCM arrived before its format");
         if (sample_format == 1) {
           if (response.payload.size() % sizeof(float)) throw std::runtime_error("invalid float PCM packet");
           std::vector<float> samples(response.payload.size() / sizeof(float));
           std::memcpy(samples.data(), response.payload.data(), response.payload.size());
-          output_pcm(processor->process(samples.data(), static_cast<int32_t>(samples.size()), false), sample_rate);
+          append_pcm(processor->process(samples.data(), static_cast<int32_t>(samples.size()), false));
         } else {
           if (response.payload.size() % sizeof(int16_t)) throw std::runtime_error("invalid s16 PCM packet");
           std::vector<int16_t> samples(response.payload.size() / sizeof(int16_t));
@@ -132,10 +164,18 @@ void speak_worker(std::string text, std::string voice_id, std::string language,
           std::vector<float> converted(samples.size());
           std::transform(samples.begin(), samples.end(), converted.begin(),
                          [](int16_t value) { return static_cast<float>(value) / 32768.0f; });
-          output_pcm(processor->process(converted.data(), static_cast<int32_t>(converted.size()), false), sample_rate);
+          append_pcm(processor->process(converted.data(), static_cast<int32_t>(converted.size()), false));
         }
       } else if (response.type == Message::Done) {
-        if (processor) { float zero = 0; output_pcm(processor->process(&zero, 0, true), sample_rate); }
+        if (processor) {
+          float zero = 0;
+          append_pcm(processor->process(&zero, 0, true));
+          // Keep one player and one completion boundary per utterance. This
+          // also prevents the broker's callback packet boundaries from
+          // becoming audible playback boundaries.
+          module_report_event_begin(); began = true;
+          output_pcm(utterance_pcm, sample_rate);
+        }
         success = true; break;
       } else if (response.type == Message::Error) {
         throw std::runtime_error(std::string(response.payload.begin(), response.payload.end()));
@@ -162,7 +202,7 @@ int module_config(const char *) {
   catch (const std::exception &e) { std::fprintf(stderr, "sd_uttermux: %s\n", e.what()); return -1; }
 }
 int module_init(char **message) {
-  module_audio_set_server();
+  ::signal(SIGPIPE, SIG_IGN);
   if (message) *message = ::strdup("UtterMux broker connected");
   return voices.empty() ? -1 : 0;
 }
@@ -190,6 +230,8 @@ int module_speak(char *data, size_t bytes, SPDMessageType) {
 }
 int module_stop(void) {
   stopped.store(true); auto request = current_request.load();
+  auto player = player_pid.load();
+  if (player > 0) ::kill(player, SIGTERM);
   if (request) {
     std::lock_guard<std::mutex> lock(send_mutex);
     if (broker_fd >= 0) {
@@ -222,7 +264,7 @@ int module_set(const char *key, const char *value) {
   } catch (...) { return -1; }
 }
 int module_audio_set(const char *, const char *) { return 0; }
-int module_audio_init(char **info) { if (info) *info = ::strdup("audio delegated to Speech Dispatcher"); return 0; }
+int module_audio_init(char **info) { if (info) *info = ::strdup("audio played through paplay"); return 0; }
 int module_loglevel_set(const char *, const char *) { return 0; }
 int module_debug(int, const char *) { return 0; }
 int module_loop(void) { return module_process(STDIN_FILENO, 1); }
