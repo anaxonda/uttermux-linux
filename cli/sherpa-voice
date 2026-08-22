@@ -110,6 +110,13 @@ def model_root(model_id: str) -> Path:
     return data_home() / APP / "models" / model_id
 
 
+def installed_model_roots(model_id: str) -> list[Path]:
+    """Known managed locations, including the pre-UtterMux storage layout."""
+    if not MODEL_ID_RE.fullmatch(model_id):
+        raise RuntimeError(f"invalid model id: {model_id}")
+    return [model_root(model_id), data_home() / "speech-dispatcher-sherpa/models" / model_id]
+
+
 def manifest_dir() -> Path:
     return config_home() / APP / "models.d"
 
@@ -338,9 +345,11 @@ def cmd_voice_list(_: argparse.Namespace) -> None:
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
-    root = model_root(args.model_id)
-    manifest = manifest_dir() / f"{args.model_id}.toml"
-    if not root.exists() and not manifest.exists():
+    roots = installed_model_roots(args.model_id)
+    manifests = [manifest_dir() / f"{args.model_id}.toml",
+                 config_home() / "speech-dispatcher-sherpa/models.d" / f"{args.model_id}.toml"]
+    manifest = next((path for path in manifests if path.exists()), manifests[0])
+    if not any(root.exists() for root in roots) and not any(path.exists() for path in manifests):
         raise RuntimeError(f"not installed: {args.model_id}")
     module_path = config_home() / "speech-dispatcher/modules/sherpa.conf"
     if manifest.exists() and module_path.exists() and not args.force:
@@ -353,9 +362,9 @@ def cmd_remove(args: argparse.Namespace) -> None:
         answer = input(f"Remove {args.model_id} and its model data? [y/N] ")
         if answer.lower() not in {"y", "yes"}:
             return
-    if root.exists():
-        shutil.rmtree(root)
-    manifest.unlink(missing_ok=True)
+    for root in roots:
+        if root.exists(): shutil.rmtree(root)
+    for path in manifests: path.unlink(missing_ok=True)
     restart_speechd(args.no_restart)
 
 

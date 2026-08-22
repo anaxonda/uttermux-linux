@@ -26,6 +26,49 @@ profiles = importlib.util.module_from_spec(profile_spec); profile_loader.exec_mo
 
 
 class CliTests(unittest.TestCase):
+    def test_directory_size_does_not_follow_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory); model = base / "model"; outside = base / "outside"
+            model.mkdir(); outside.write_bytes(b"x" * 1000)
+            (model / "weights.onnx").write_bytes(b"x" * 50)
+            (model / "external").symlink_to(outside)
+            self.assertLess(ut.directory_size(model), 1000)
+
+    def test_model_remove_is_noninteractive(self):
+        item = {"id": "test-model", "engine": "vits", "voices": []}
+        with mock.patch.object(ut, "local_catalog", return_value=[item]), \
+             mock.patch.object(ut, "installed_helper", return_value=Path("/manager")), \
+             mock.patch.object(ut.subprocess, "run") as run:
+            ut.cmd_model(argparse.Namespace(action="remove", model_id="test-model"))
+        self.assertEqual(run.call_args.args[0][1:], ["model", "remove", "test-model", "--yes"])
+
+    def test_legacy_model_location_is_measured_and_removed(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(Path(directory) / "data"),
+                                          "XDG_CONFIG_HOME": str(Path(directory) / "config")}):
+            item = {"id": "old-model", "engine": "vits"}
+            legacy = Path(directory) / "data/speech-dispatcher-sherpa/models/old-model"
+            legacy.mkdir(parents=True); (legacy / "model.onnx").write_bytes(b"x" * 123)
+            old_manifest = Path(directory) / "config/speech-dispatcher-sherpa/models.d/old-model.toml"
+            old_manifest.parent.mkdir(parents=True); old_manifest.write_text('id="old-model"\n')
+            self.assertEqual(ut.managed_model_root(item), legacy)
+            self.assertGreaterEqual(ut.directory_size(legacy), 123)
+            with mock.patch.object(sv, "restart_speechd"):
+                sv.cmd_remove(argparse.Namespace(model_id="old-model", yes=True, force=True, no_restart=True))
+            self.assertFalse(legacy.exists()); self.assertFalse(old_manifest.exists())
+
+    def test_external_model_removal_deletes_only_model_data(self):
+        item = {"id": "moss-tts-nano-100m-onnx", "engine": "moss",
+                "external_installer": "install-moss", "voices": []}
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.dict(os.environ, {"XDG_DATA_HOME": directory, "XDG_CONFIG_HOME": directory}), \
+             mock.patch.object(ut, "local_catalog", return_value=[item]), \
+             mock.patch.object(ut, "restart"):
+            model = ut.managed_model_root(item); model.mkdir(parents=True); (model / "model.onnx").write_bytes(b"x")
+            runtime = ut.data_root() / "runtimes/moss-tts-nano"; runtime.mkdir(parents=True)
+            ut.cmd_model(argparse.Namespace(action="remove", model_id=item["id"]))
+            self.assertFalse(model.exists()); self.assertTrue(runtime.exists())
+
     def test_cloud_provider_configuration_is_separate_and_mode_0600(self):
         with tempfile.TemporaryDirectory() as directory, \
              mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}), \

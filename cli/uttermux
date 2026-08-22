@@ -62,6 +62,33 @@ def data_root() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "uttermux"
 
 
+def managed_model_root(item: dict) -> Path:
+    """Return the data directory owned by a downloadable catalog artifact."""
+    external = {"qwen": "qwen3-tts-0.6b", "moss": "moss-tts-nano"}
+    name = external.get(item.get("engine", ""), item["id"])
+    current = data_root() / "models" / name
+    legacy = data_root().parent / "speech-dispatcher-sherpa/models" / name
+    return current if current.exists() or item.get("external_installer") else legacy if legacy.exists() else current
+
+
+def directory_size(path: Path) -> int:
+    """Measure logical bytes without following links outside a managed model."""
+    if not path.exists(): return 0
+    total, pending = 0, [path]
+    while pending:
+        current = pending.pop()
+        try:
+            for child in current.iterdir():
+                try:
+                    stat = child.lstat(); total += stat.st_size
+                    if child.is_dir() and not child.is_symlink(): pending.append(child)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return total
+
+
 def config_path() -> Path:
     return config_dir() / "config.toml"
 
@@ -410,8 +437,9 @@ def cmd_catalog(_args):
     for item in local_catalog():
         languages = item.get("languages") or sorted({voice.get("language", "und") for voice in item.get("voices", [])})
         companion = item["engine"] if item.get("external_installer") else ""
-        installed = (any(record["provider"] == companion for record in ready.values()) if companion else
+        installed = (managed_model_root(item).is_dir() if companion else
                      item["id"] in installed_model_ids)
+        installed_bytes = directory_size(managed_model_root(item)) if installed else 0
         models.append({
             "id": item["id"], "providerId": companion or "local",
             "library": item.get("family", item["engine"]),
@@ -419,6 +447,8 @@ def cmd_catalog(_args):
             "languages": languages, "capabilities": item.get("capabilities", []),
             "status": "ready" if installed else "downloadable",
             "downloadSizeMb": round(int(item.get("size", 0)) / 1024 / 1024),
+            "installedSizeBytes": installed_bytes,
+            "removable": installed,
             "estimatedRamMb": int(item.get("estimated_ram_mb", 0)),
             "quantization": item.get("quantization", ""),
             "performanceClass": item.get("performance_class", "unknown"),
@@ -872,18 +902,33 @@ def cmd_eleven_voice(args):
 
 def cmd_model(args):
     item = next((item for item in local_catalog() if item["id"] == args.model_id), None)
+    if item and args.action == "remove":
+        active = read_config().get("default_voice", "")
+        companion = item["engine"] if item.get("external_installer") else "sherpa"
+        voice_ids = {f"{companion}/{voice['id']}" if companion != "sherpa" else
+                     f"sherpa/{item['id']}/{voice['id']}" for voice in item.get("voices", [])}
+        if active in voice_ids or (companion != "sherpa" and active.startswith(f"{companion}/")):
+            raise RuntimeError("select a different active voice before deleting this model")
     if item and item.get("external_installer"):
-        if args.action != "install":
-            raise RuntimeError(f"{item['family']} removal is not automated; model data is preserved")
-        name = str(item["external_installer"])
-        installer = installed_helper(name)
-        if not installer.exists(): installer = Path(__file__).resolve().parents[1] / "scripts" / name
-        subprocess.run([str(installer)], check=True)
-        return
+        if args.action == "install":
+            name = str(item["external_installer"])
+            installer = installed_helper(name)
+            if not installer.exists(): installer = Path(__file__).resolve().parents[1] / "scripts" / name
+            subprocess.run([str(installer)], check=True)
+            return
+        if args.action == "remove":
+            root = managed_model_root(item)
+            if not root.is_dir(): raise RuntimeError(f"not installed: {item['id']}")
+            shutil.rmtree(root)
+            restart()
+            print(f"Removed {item['id']} model data")
+            return
+        raise RuntimeError(f"unsupported model action: {args.action}")
     manager = installed_helper("model-manager")
     if not manager.exists(): manager = Path(__file__).with_name("sherpa-voice")
     command = [str(manager), "model", args.action]
     if args.model_id: command.append(args.model_id)
+    if args.action == "remove": command.append("--yes")
     subprocess.run(command, check=True)
 
 

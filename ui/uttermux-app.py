@@ -67,6 +67,11 @@ def language_label(tag: str) -> str:
     return f"{LANGUAGE_NAMES.get(base, tag)} ({tag})"
 
 
+def size_label(size: int) -> str:
+    if size >= 1024 ** 3: return f"{size / 1024 ** 3:.1f} GiB installed"
+    return f"{size / 1024 ** 2:.1f} MiB installed"
+
+
 class VoicePage(Gtk.Box):
     def __init__(self, window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -182,6 +187,7 @@ class VoicePage(Gtk.Box):
 
     def rebuild(self):
         while child := self.listbox.get_first_child(): self.listbox.remove(child)
+        active_model_id = next((item.get("modelId") for item in self.records if item["id"] == self.default_id), "")
         terms = self.search.get_text().casefold().split()
         result = []
         for record in self.records:
@@ -219,6 +225,7 @@ class VoicePage(Gtk.Box):
             details = [self.provider_names.get(provider, provider), model.get("library", record.get("modelId", "")),
                        ", ".join(record.get("languages", [])), model.get("performanceClass", "")]
             if model.get("downloadSizeMb"): details.append(f"{model['downloadSizeMb']} MB download")
+            if model.get("installedSizeBytes"): details.append(size_label(model["installedSizeBytes"]))
             if model.get("estimatedRamMb"): details.append(f"~{model['estimatedRamMb']} MB RAM")
             if model.get("quantization"): details.append(model["quantization"])
             recommendation = model.get("recommendation", "unknown")
@@ -240,6 +247,13 @@ class VoicePage(Gtk.Box):
                 if model.get("providerId") == "local":
                     test = Gtk.Button(label="Test model"); test.connect("clicked", lambda *_args: self.window.show_test_page())
                     row.append(test)
+                if model.get("removable"):
+                    delete = Gtk.Button(label="Delete model")
+                    delete.add_css_class("destructive-action")
+                    delete.set_sensitive(record["modelId"] != active_model_id)
+                    if record["modelId"] == active_model_id:
+                        delete.set_tooltip_text("Select a voice from another model before deleting this model")
+                    delete.connect("clicked", self.confirm_delete, record); row.append(delete)
             elif model.get("location") == "on-device":
                 install = Gtk.Button(label="Download"); install.connect("clicked", self.install, record); row.append(install)
             self.listbox.append(row)
@@ -283,6 +297,20 @@ class VoicePage(Gtk.Box):
             return GLib.SOURCE_REMOVE
         threading.Thread(target=work, daemon=True).start()
     def install(self, _button, record): self.window.run_task(command("model", "install", record["modelId"]), "Model installed", self.load)
+
+    def confirm_delete(self, _button, record):
+        model = record["model"]
+        size = size_label(model.get("installedSizeBytes", 0)).removesuffix(" installed")
+        dialog = Gtk.AlertDialog(message=f"Delete {model.get('library', record['name'])}?", detail=(
+            f"This removes {size} of downloaded model data. All voices supplied by this model will become unavailable. "
+            "Runtime components and your settings are preserved."),
+            buttons=["Cancel", "Delete"], cancel_button=0, default_button=0)
+        def chosen(_dialog, task):
+            try: choice = _dialog.choose_finish(task)
+            except GLib.Error: choice = 0
+            if choice == 1:
+                self.window.run_task(command("model", "remove", record["modelId"]), "Model deleted", self.load)
+        dialog.choose(self.window, None, chosen)
 
 
 class CreatePage(Gtk.Box):
