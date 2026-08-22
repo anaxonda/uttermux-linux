@@ -1325,14 +1325,20 @@ def client_loop(connection: socket.socket, broker: Broker) -> None:
                                           requested_language, threads)
                         send(packet(DONE, rid))
                     except Exception as error:
-                        send(packet(ERROR, rid, str(error).encode("utf-8", "replace")))
+                        try:
+                            send(packet(ERROR, rid, str(error).encode("utf-8", "replace")))
+                        except OSError:
+                            # The client may disconnect while a provider is
+                            # still unwinding cancellation. There is no peer
+                            # left to receive the terminal error in that case.
+                            pass
                     finally:
                         jobs.pop(rid, None)
 
                 threading.Thread(target=run, daemon=True).start()
             else:
                 send(packet(ERROR, request_id, b"unsupported message"))
-    except (BrokenPipeError, ConnectionResetError):
+    except (BrokenPipeError, ConnectionResetError, OSError):
         pass
     finally:
         for event in list(jobs.values()):

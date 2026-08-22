@@ -148,6 +148,7 @@ void speak_worker(std::string text, std::string voice_id, std::string language,
   bool began = false, success = false;
   int sample_rate = 0;
   uint8_t sample_format = 1;
+  std::vector<uint8_t> pending_audio;
   std::unique_ptr<sdsherpa::AudioProcessor> processor;
   std::unique_ptr<PcmPlayer> player;
   auto play_pcm = [&](std::vector<int16_t> pcm) {
@@ -174,24 +175,29 @@ void speak_worker(std::string text, std::string voice_id, std::string language,
         if (sample_rate < 8000 || sample_rate > 192000) throw std::runtime_error("invalid sample rate");
         processor = std::make_unique<sdsherpa::AudioProcessor>(sample_rate, pitch, volume);
         player = std::make_unique<PcmPlayer>(sample_rate);
+        pending_audio.clear();
         module_report_event_begin(); began = true;
       } else if (response.type == Message::Audio) {
         if (!processor) throw std::runtime_error("PCM arrived before its format");
+        pending_audio.insert(pending_audio.end(), response.payload.begin(), response.payload.end());
+        const size_t sample_bytes = sample_format == 1 ? sizeof(float) : sizeof(int16_t);
+        const size_t aligned_bytes = pending_audio.size() - pending_audio.size() % sample_bytes;
+        if (!aligned_bytes) continue;
         if (sample_format == 1) {
-          if (response.payload.size() % sizeof(float)) throw std::runtime_error("invalid float PCM packet");
-          std::vector<float> samples(response.payload.size() / sizeof(float));
-          std::memcpy(samples.data(), response.payload.data(), response.payload.size());
+          std::vector<float> samples(aligned_bytes / sizeof(float));
+          std::memcpy(samples.data(), pending_audio.data(), aligned_bytes);
           play_pcm(processor->process(samples.data(), static_cast<int32_t>(samples.size()), false));
         } else {
-          if (response.payload.size() % sizeof(int16_t)) throw std::runtime_error("invalid s16 PCM packet");
-          std::vector<int16_t> samples(response.payload.size() / sizeof(int16_t));
-          std::memcpy(samples.data(), response.payload.data(), response.payload.size());
+          std::vector<int16_t> samples(aligned_bytes / sizeof(int16_t));
+          std::memcpy(samples.data(), pending_audio.data(), aligned_bytes);
           std::vector<float> converted(samples.size());
           std::transform(samples.begin(), samples.end(), converted.begin(),
                          [](int16_t value) { return static_cast<float>(value) / 32768.0f; });
           play_pcm(processor->process(converted.data(), static_cast<int32_t>(converted.size()), false));
         }
+        pending_audio.erase(pending_audio.begin(), pending_audio.begin() + aligned_bytes);
       } else if (response.type == Message::Done) {
+        if (!pending_audio.empty()) throw std::runtime_error("incomplete final PCM sample");
         if (processor) {
           float zero = 0;
           play_pcm(processor->process(&zero, 0, true));
@@ -228,7 +234,7 @@ int module_init(char **message) {
   return voices.empty() ? -1 : 0;
 }
 SPDVoice **module_list_voices(void) { return speechd_voices.empty() ? nullptr : speechd_voices.data(); }
-int module_speak(char *data, size_t bytes, SPDMessageType) {
+int module_speak(char *data, size_t bytes, SPDMessageType message_type) {
   if (!data || !bytes) return 0;
   try {
     join_worker(); stopped.store(false); paused.store(false);
@@ -241,6 +247,9 @@ int module_speak(char *data, size_t bytes, SPDMessageType) {
       rate = current_rate; pitch = current_pitch; volume = current_volume;
     }
     std::string text = text_from_ssml(std::string_view(data, bytes));
+    const size_t embedded_nuls = static_cast<size_t>(std::count(data, data + bytes, '\0'));
+    std::fprintf(stderr, "sd_uttermux: speak type=%d bytes=%zu text=%zu nuls=%zu\n",
+                 static_cast<int>(message_type), bytes, text.size(), embedded_nuls);
     if (text.empty()) return 0;
     uint64_t request = next_request++;
     current_request.store(request);
