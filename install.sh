@@ -6,6 +6,30 @@ repo=https://github.com/anaxonda/uttermux-linux
 work=$(mktemp -d "${TMPDIR:-/tmp}/uttermux-install.XXXXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
+install_arch_package() {
+  local archive=$1 entry target
+  local -a overwrite_args=()
+
+  # Releases before the native packages were installed with `cmake --install`.
+  # Those files have no pacman owner, so let this package adopt only exact paths
+  # that it contains. Files owned by any other package remain protected by
+  # pacman's normal conflict handling.
+  while IFS= read -r entry; do
+    [[ -n $entry && $entry != */ && $entry != .* ]] || continue
+    entry=${entry#./}
+    target=/$entry
+    if [[ -e $target || -L $target ]] && ! pacman -Qo -- "$target" >/dev/null 2>&1; then
+      overwrite_args+=(--overwrite "$entry")
+    fi
+  done < <(bsdtar -tf "$archive")
+
+  if ((${#overwrite_args[@]})); then
+    printf 'Adopting %d files from an earlier source installation…\n' \
+      "$(( ${#overwrite_args[@]} / 2 ))"
+  fi
+  sudo pacman -U --needed --noconfirm "${overwrite_args[@]}" "$archive"
+}
+
 if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
   printf '%s\n' 'Run this installer as your normal user; makepkg will invoke sudo when needed.' >&2
   exit 2
@@ -54,7 +78,7 @@ if [[ $machine == x86_64 && ${UTTERMUX_FORCE_SOURCE:-0} != 1 ]]; then
       printf 'Verified Arch binary package: %s\n' "$tag"
       exit 0
     fi
-    sudo pacman -U --needed --noconfirm "$work/$package"
+    install_arch_package "$work/$package"
     uttermux setup
     uttermux doctor
     printf '%s\n' 'UtterMux is installed. Restart applications that cache system voice lists.'
