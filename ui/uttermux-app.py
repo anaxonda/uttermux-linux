@@ -90,9 +90,10 @@ class VoicePage(Gtk.Box):
         row = Gtk.Box(spacing=8); self.append(row)
         self.location = Gtk.DropDown(model=Gtk.StringList.new(["All locations", "Offline", "Online"]))
         self.readiness = Gtk.DropDown(model=Gtk.StringList.new(["All voices", "Ready", "Downloadable"]))
+        self.favorites = Gtk.DropDown(model=Gtk.StringList.new(["All voices", "Favorites"]))
         self.performance = Gtk.DropDown(model=Gtk.StringList.new(["Any performance", "Fast", "Balanced", "Heavy", "Cloud"]))
         self.sorting = Gtk.DropDown(model=Gtk.StringList.new(["Recommended", "Name", "Smallest download", "Lowest RAM"]))
-        for widget in (self.location, self.readiness, self.performance, self.sorting):
+        for widget in (self.favorites, self.location, self.readiness, self.performance, self.sorting):
             widget.connect("notify::selected", self.filter_changed); row.append(widget)
         clear = Gtk.Button(label="Clear filters"); clear.connect("clicked", self.clear); row.append(clear)
         self.status = Gtk.Label(xalign=0); self.append(self.status)
@@ -139,14 +140,14 @@ class VoicePage(Gtk.Box):
     def clear(self, *_args):
         self.search.set_text("")
         for dropdown in self.exact_filters.values(): dropdown.set_selected(0)
-        for dropdown in (self.location, self.readiness, self.performance, self.sorting): dropdown.set_selected(0)
+        for dropdown in (self.favorites, self.location, self.readiness, self.performance, self.sorting): dropdown.set_selected(0)
         self.rebuild()
 
     def filter_changed(self, *_args):
         if self.loading_filters: return
         filters = {"query": self.search.get_text()}
         filters.update({f"exact_{key}": self.dropdown_value(key) for key in self.exact_filters})
-        filters.update({"location_index": self.location.get_selected(), "readiness_index": self.readiness.get_selected(),
+        filters.update({"favorites_index": self.favorites.get_selected(), "location_index": self.location.get_selected(), "readiness_index": self.readiness.get_selected(),
                         "performance_index": self.performance.get_selected(), "sorting_index": self.sorting.get_selected()})
         self.filter_state = filters
         save_state({"filters": filters})
@@ -169,7 +170,7 @@ class VoicePage(Gtk.Box):
             self.exact_values[key] = ["", *values[key]]
             dropdown.set_model(Gtk.StringList.new([labels[key], *displays[key]]))
             dropdown.set_selected(self.exact_values[key].index(wanted) if wanted in self.exact_values[key] else 0)
-        for key, widget in (("location_index", self.location), ("readiness_index", self.readiness),
+        for key, widget in (("favorites_index", self.favorites), ("location_index", self.location), ("readiness_index", self.readiness),
                             ("performance_index", self.performance), ("sorting_index", self.sorting)):
             widget.set_selected(int(self.filter_state.get(key, 0)))
         self.loading_filters = False
@@ -199,6 +200,7 @@ class VoicePage(Gtk.Box):
             if self.location.get_selected() == 1 and online: continue
             if self.location.get_selected() == 2 and not online: continue
             ready = bool(record.get("ready"))
+            if self.favorites.get_selected() == 1 and not record.get("favorite", False): continue
             if self.readiness.get_selected() == 1 and not ready: continue
             if self.readiness.get_selected() == 2 and ready: continue
             perf = model.get("performanceClass", "unknown").casefold()
@@ -226,6 +228,9 @@ class VoicePage(Gtk.Box):
             label.set_markup(f"<b>{html.escape(marker + record['name'])}</b>\n<small>{html.escape(' · '.join(filter(None, details)))}</small>")
             label.set_tooltip_text(model.get("recommendationReason", ""))
             row.append(label)
+            favorite = Gtk.Button(label="★" if record.get("favorite") else "☆")
+            favorite.set_tooltip_text("Remove from favorites" if record.get("favorite") else "Add to favorites")
+            favorite.connect("clicked", self.toggle_favorite, record); row.append(favorite)
             if record.get("ready"):
                 choose = Gtk.Button(label="Active" if record["id"] == self.default_id else "Use")
                 choose.set_sensitive(record["id"] != self.default_id)
@@ -253,6 +258,11 @@ class VoicePage(Gtk.Box):
                 if widget.get_selected(): active.append(values[widget.get_selected()])
             detail = f" Active filters: {', '.join(active)}." if active else ""
             self.status.set_text(f"No matching voices.{detail} Use Clear filters to show the full catalog.")
+
+    def toggle_favorite(self, _button, record):
+        action = "remove" if record.get("favorite") else "add"
+        self.window.run_task(command("favorite", action, record["id"]),
+                             "Favorite updated", self.load)
 
     def choose(self, _button, record): self.window.run_task(command("default", record["id"]), "Voice selected", self.load)
     def preview(self, button, record, spinner):
@@ -425,6 +435,8 @@ class SettingsPage(Gtk.Box):
         box.append(self.setting_row("Detect language automatically", "Routes longer text to a compatible configured voice.", self.auto_language))
         self.preload_voice = Gtk.Switch(); self.preload_voice.connect("state-set", self.set_boolean, "preload-default-voice")
         box.append(self.setting_row("Preload active local voice", "Uses more memory after login, but removes the first-use model loading delay.", self.preload_voice))
+        self.playback_speed = Gtk.SpinButton.new_with_range(.5, 2, .05); self.playback_speed.set_digits(2)
+        box.append(self.setting_row("Speech speed", "Global multiplier for every provider and client. Application rate controls are multiplied by this value; 1.00 is unchanged.", self.playback_speed))
         box.append(Gtk.Separator())
         performance_heading = Gtk.Label(label="Local inference", xalign=0); performance_heading.add_css_class("heading")
         box.append(performance_heading)
@@ -498,6 +510,7 @@ class SettingsPage(Gtk.Box):
         playback = schema.get("playback", {})
         self.auto_language.set_active(bool(playback.get("autoDetectLanguage", {}).get("value", True)))
         self.preload_voice.set_active(bool(playback.get("preloadDefaultVoice", {}).get("value", False)))
+        self.playback_speed.set_value(playback.get("playbackSpeed", {}).get("value", 1.0))
         self.local_threads.set_value(playback.get("localThreads", {}).get("value", 0))
         self.pocket_threads.set_value(playback.get("pocketThreads", {}).get("value", 0))
         self.silence_scale.set_value(playback.get("localSilenceScale", {}).get("value", .2))
@@ -531,7 +544,8 @@ class SettingsPage(Gtk.Box):
 
     def apply_advanced(self, *_args):
         def work():
-            values = (("local-threads", self.local_threads.get_value_as_int()),
+            values = (("playback-speed", self.playback_speed.get_value()),
+                      ("local-threads", self.local_threads.get_value_as_int()),
                       ("pocket-threads", self.pocket_threads.get_value_as_int()),
                       ("local-silence-scale", self.silence_scale.get_value()),
                       ("pocket-num-steps", self.pocket_steps.get_value_as_int()),

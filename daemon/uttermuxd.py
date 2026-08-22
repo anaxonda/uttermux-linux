@@ -1220,6 +1220,7 @@ class Broker:
         text = normalize_synthesis_text(text)
         if not text:
             return
+        speed = max(.5, min(2.0, speed * float(self.config.get("playback_speed", 1.0))))
         language, candidates = self._route(voice_id, requested_language, text)
         if thread_override:
             if voice_id not in self.voices:

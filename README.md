@@ -39,7 +39,7 @@ SSIP / Speech Dispatcher clients
 
 The GTK application has the same four top-level areas as the Android app:
 
-- **Voices** — search, filter, download, preview, and choose a default voice.
+- **Voices** — search, filter, favorite, download, preview, and choose a default voice.
 - **Create voice** — create and manage Pocket, ZipVoice, or ElevenLabs clones.
 - **Test & tune** — benchmark exact installed artifacts, adjust per-model
   settings, and select the tested voice.
@@ -318,6 +318,7 @@ Advanced performance controls are available in both Settings and the CLI:
 
 | Setting | Fresh default | Effect |
 | --- | ---: | --- |
+| `playback-speed` | 1.0 | Global 0.5–2.0 multiplier composed with each client's requested rate |
 | `local-threads` | Automatic | Uses up to 4 CPU threads per local sherpa model |
 | `pocket-threads` | Automatic | Uses up to 2 CPU threads; Pocket can regress with excess parallelism |
 | `local-silence-scale` | 0.2 | Scales pauses generated inside one local utterance |
@@ -342,6 +343,9 @@ installed artifact, open **Test & tune → Model settings**. Manual model settin
 take precedence over a saved benchmark profile; a saved profile takes precedence
 over global defaults and automatic selection. Playback buffering, model-cache
 size, language routing, and cloud caching remain global.
+Pitch remains controlled by each Speech Dispatcher client and is applied by
+the output module after synthesis. Favorites are independent of model download
+state and can also be managed with `uttermux favorite add|remove|list`.
 The panel is engine-aware: all sherpa artifacts expose threads and generated
 silence; Pocket adds refinement and decoder chunk size, ZipVoice adds generation
 steps, and MOSS adds decode batching. Every row reports its effective value and

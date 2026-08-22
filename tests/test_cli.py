@@ -111,6 +111,7 @@ class CliTests(unittest.TestCase):
 
     def test_render_preserves_advanced_tuning(self):
         rendered = ut.render_config({
+            "playback_speed": 1.25, "favorite_voices": ["edge/libby", "sherpa/alan"],
             "local_threads": 2, "pocket_threads": 3, "local_silence_scale": .1,
             "pocket_num_steps": 5, "pocket_chunk_size": 8,
             "zipvoice_num_steps": 6, "moss_threads": 2, "moss_batch_frames": 4,
@@ -125,6 +126,17 @@ class CliTests(unittest.TestCase):
         self.assertIn("moss_threads = 2", rendered)
         self.assertIn("moss_batch_frames = 4", rendered)
         self.assertIn("external_idle_seconds = 90", rendered)
+        document = __import__("tomllib").loads(rendered)
+        self.assertEqual(document["playback_speed"], 1.25)
+        self.assertEqual(document["favorite_voices"], ["edge/libby", "sherpa/alan"])
+
+    def test_favorite_command_persists_without_restarting_broker(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}):
+            ut.cmd_favorite(argparse.Namespace(action="add", voice="sherpa/alan"))
+            self.assertEqual(ut.read_config()["favorite_voices"], ["sherpa/alan"])
+            ut.cmd_favorite(argparse.Namespace(action="remove", voice="sherpa/alan"))
+            self.assertEqual(ut.read_config().get("favorite_voices", []), [])
 
     def test_render_preserves_per_artifact_tuning(self):
         rendered = ut.render_config({"tuning": {"models": {

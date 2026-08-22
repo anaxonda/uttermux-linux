@@ -144,6 +144,13 @@ class ProtocolTests(unittest.TestCase):
                               threading.Event(), "fr")
         self.assertEqual(attempted, ["elevenlabs/bill"])
 
+    def test_global_speed_multiplies_client_rate(self):
+        broker = self.broker(); broker.config["playback_speed"] = 1.25
+        speeds = []
+        broker._synthesize_voice = lambda _voice, _text, speed, _language, _emit, _cancelled: speeds.append(speed)
+        broker.synthesize("edge/libby", "Hello", 1.2, lambda _raw: None, threading.Event(), "en-US")
+        self.assertEqual(speeds, [1.5])
+
     def test_grok_uses_provider_auto_language_and_pcm(self):
         voice_response = mock.MagicMock()
         voice_response.__enter__.return_value = io.BytesIO(

@@ -147,6 +147,7 @@ def quote(value) -> str:
 def render_config(doc: dict) -> str:
     lines = ["schema_version = 2", f'max_loaded_models = {int(doc.get("max_loaded_models", 0))}',
              f'audio_cache_mb = {int(doc.get("audio_cache_mb", 64))}',
+             f'playback_speed = {float(doc.get("playback_speed", 1.0))}',
              f'local_threads = {int(doc.get("local_threads", 0))}',
              f'pocket_threads = {int(doc.get("pocket_threads", 0))}',
              f'local_silence_scale = {float(doc.get("local_silence_scale", .2))}',
@@ -157,6 +158,8 @@ def render_config(doc: dict) -> str:
              f'moss_batch_frames = {int(doc.get("moss_batch_frames", 4))}',
              f'external_idle_seconds = {int(doc.get("external_idle_seconds", 120))}',
              f'preload_default_voice = {str(bool(doc.get("preload_default_voice", False))).lower()}']
+    favorites = [str(value) for value in doc.get("favorite_voices", []) if str(value)]
+    if favorites: lines.append("favorite_voices = [" + ", ".join(quote(value) for value in favorites) + "]")
     for key in ("default_voice", "fallback_voice"):
         if doc.get(key): lines.append(f'{key} = {quote(doc[key])}')
     for model_id, tuning in sorted(doc.get("tuning", {}).get("models", {}).items()):
@@ -463,6 +466,8 @@ def cmd_catalog(_args):
         catalog_voices.append({"id": record["id"], "modelId": model_id, "speakerId": record["id"].split("/")[-1],
             "name": record["name"], "languages": record["languages"], "preview": "generated", "ready": True})
     hardware = hardware_profile()
+    favorite_ids = set(read_config().get("favorite_voices", []))
+    for voice in catalog_voices: voice["favorite"] = voice["id"] in favorite_ids
     for model in models:
         recommendation, reason = recommend_model(model, hardware)
         model["recommendation"] = recommendation
@@ -543,6 +548,8 @@ def cmd_settings_schema(_args):
                                       "value": "" if secret else configured.get(key, default)}
                                      for key, label, secret, default in fields]})
     print(json.dumps({"schemaVersion": 1, "providers": providers, "playback": {
+        "playbackSpeed": {"type": "number", "minimum": .5, "maximum": 2, "default": 1,
+                          "value": float(document.get("playback_speed", 1.0))},
         "maxLoadedModels": {"type": "integer", "minimum": 0, "maximum": 8, "default": 0,
                             "value": int(document.get("max_loaded_models", 0))},
         "audioCacheMb": {"type": "integer", "minimum": 0, "maximum": 1024, "default": 64,
@@ -795,6 +802,8 @@ def cmd_setting(args):
         doc["max_loaded_models"] = max(0, min(8, int(args.value)))
     elif args.name == "audio-cache-mb":
         doc["audio_cache_mb"] = max(0, min(1024, int(args.value)))
+    elif args.name == "playback-speed":
+        doc["playback_speed"] = max(.5, min(2.0, float(args.value)))
     elif args.name == "local-threads":
         doc["local_threads"] = max(0, min(16, 0 if args.value.casefold() == "auto" else int(args.value)))
     elif args.name == "pocket-threads":
@@ -834,6 +843,17 @@ def cmd_setting(args):
         doc["preload_default_voice"] = value in {"true", "1", "yes"}
     atomic_write(config_path(), render_config(doc))
     if not args.defer_restart: restart()
+
+
+def cmd_favorite(args):
+    doc = read_config(); values = list(dict.fromkeys(str(value) for value in doc.get("favorite_voices", []) if value))
+    if args.action == "list":
+        print(json.dumps(values, ensure_ascii=False, indent=2)); return
+    if not args.voice: raise RuntimeError(f"favorite {args.action} requires a voice ID")
+    if args.action == "add" and args.voice not in values: values.append(args.voice)
+    elif args.action == "remove": values = [value for value in values if value != args.voice]
+    doc["favorite_voices"] = values
+    atomic_write(config_path(), render_config(doc))
 
 
 def cmd_edge_locales(args):
@@ -1306,7 +1326,8 @@ def main():
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
     p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=ONLINE_PROVIDERS); p.set_defaults(func=cmd_provider)
     p = sub.add_parser("provider-default"); p.add_argument("provider", choices=ONLINE_PROVIDERS); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
-    p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb",
+    p = sub.add_parser("favorite"); p.add_argument("action", choices=("list", "add", "remove")); p.add_argument("voice", nargs="?"); p.set_defaults(func=cmd_favorite)
+    p = sub.add_parser("setting"); p.add_argument("name", choices=("max-loaded-models", "audio-cache-mb", "playback-speed",
         "local-threads", "pocket-threads", "local-silence-scale", "pocket-num-steps", "pocket-chunk-size",
         "zipvoice-num-steps", "moss-threads", "moss-batch-frames",
         "external-idle-seconds",
