@@ -17,6 +17,7 @@ license recorded for each downloadable artifact before installation.
 | MOSS-TTS-Nano | Apache-2.0 | Apache-2.0 current artifacts | Downloaded on request; Linux uses a companion installer |
 | Qwen3-TTS | Apache-2.0 current release | Model license and voice-use policy apply | Downloaded on request through a platform-specific installer |
 | Edge, ElevenLabs, xAI and other APIs | Provider service | Provider terms, quotas, and voice-consent rules apply | No service data bundled |
+| eSpeak NG | GPL-3.0-or-later | System package on Linux; runtime and language data embedded on Android | No neural model weights |
 
 Never clone or distribute a person's voice without the rights and consent
 required in the relevant jurisdiction and service terms. Before a release,

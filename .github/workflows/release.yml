@@ -53,3 +53,57 @@ jobs:
           gh release create "$GITHUB_REF_NAME"
           "uttermux-linux-${GITHUB_REF_NAME#v}.tar.gz" SHA256SUMS PKGBUILD
           --repo "$GITHUB_REPOSITORY" --prerelease --generate-notes
+
+  arch-package:
+    needs: source-release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install package dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed git sudo speech-dispatcher libspeechd
+          rubberband python python-gobject gtk4 python-numpy python-aiohttp
+          python-certifi python-tabulate python-typing_extensions curl ffmpeg libpulse onnxruntime-cpu espeak-ng cmake
+          ninja gcc pkgconf github-cli
+      - name: Download release PKGBUILD
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern PKGBUILD
+      - name: Build as an unprivileged package user
+        run: |
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -c "cd '$GITHUB_WORKSPACE' && UTTERMUX_BUILD_JOBS=2 makepkg --cleanbuild --noconfirm --nodeps"
+          package=$(find . -maxdepth 1 -name 'uttermux-*.pkg.tar.zst' -print -quit)
+          test -n "$package"
+          mv "$package" "uttermux-${GITHUB_REF_NAME#v}-arch-x86_64.pkg.tar.zst"
+          sha256sum "uttermux-${GITHUB_REF_NAME#v}-arch-x86_64.pkg.tar.zst" > "uttermux-${GITHUB_REF_NAME#v}-arch-x86_64.pkg.tar.zst.sha256"
+      - name: Upload Arch package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$GITHUB_REF_NAME"
+          "uttermux-${GITHUB_REF_NAME#v}-arch-x86_64.pkg.tar.zst"
+          "uttermux-${GITHUB_REF_NAME#v}-arch-x86_64.pkg.tar.zst.sha256"
+          --repo "$GITHUB_REPOSITORY" --clobber
+
+  debian-package:
+    needs: source-release
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install build and package dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates curl cmake ninja-build g++ pkg-config python3 python3-pip dpkg-dev libspeechd-dev libspeechd-module0 librubberband-dev ffmpeg gh
+      - uses: actions/checkout@v7
+      - name: Build Debian package
+        run: packaging/debian/build-deb "${GITHUB_REF_NAME#v}" "$GITHUB_WORKSPACE/dist"
+      - name: Upload Debian package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$GITHUB_REF_NAME"
+          "dist/uttermux-${GITHUB_REF_NAME#v}-debian-amd64.deb"
+          "dist/uttermux-${GITHUB_REF_NAME#v}-debian-amd64.deb.sha256"
+          --repo "$GITHUB_REPOSITORY" --clobber

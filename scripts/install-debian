@@ -1,21 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo=https://github.com/anaxonda/uttermux-linux
 if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
   printf '%s\n' 'Run this installer as your normal user; it invokes sudo for packages and installation.' >&2
   exit 2
 fi
 command -v sudo >/dev/null || { printf '%s\n' 'sudo is required.' >&2; exit 2; }
 
+work=$(mktemp -d "${TMPDIR:-/tmp}/uttermux-debian.XXXXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+  https://api.github.com/repos/anaxonda/uttermux-linux/releases?per_page=10 -o "$work/releases.json"
+tag=$(sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' "$work/releases.json" | head -n1)
+[[ $tag =~ ^v[0-9A-Za-z._-]+$ ]] || { printf '%s\n' 'Could not resolve a safe release tag.' >&2; exit 1; }
+version=${tag#v}
+machine=$(dpkg --print-architecture)
+if [[ $machine == amd64 && ${UTTERMUX_FORCE_SOURCE:-0} != 1 ]]; then
+  package="uttermux-$version-debian-amd64.deb"
+  printf 'Downloading prebuilt Debian package %s…\n' "$package"
+  if curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+      "$repo/releases/download/$tag/$package" -o "$work/$package" &&
+     curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+      "$repo/releases/download/$tag/$package.sha256" -o "$work/$package.sha256"; then
+    (cd "$work" && sha256sum --check "$package.sha256")
+    if [[ ${UTTERMUX_INSTALL_CHECK_ONLY:-0} == 1 ]]; then
+      printf 'Verified Debian binary package: %s\n' "$tag"
+      exit 0
+    fi
+    sudo apt-get update
+    sudo apt-get install -y "$work/$package"
+    uttermux setup
+    uttermux doctor
+    printf '%s\n' 'UtterMux is installed. Restart applications that cache system voice lists.'
+    exit 0
+  fi
+  printf '%s\n' 'No prebuilt package was published for this release; falling back to a source build.' >&2
+fi
+
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   ca-certificates curl git cmake ninja-build g++ pkg-config python3 python3-pip \
   libspeechd-dev libspeechd-module0 librubberband-dev \
-  ffmpeg libgtk-4-1 python3-gi python3-numpy python3-aiohttp python3-certifi \
-  pulseaudio-utils wl-clipboard xclip
-
-work=$(mktemp -d "${TMPDIR:-/tmp}/uttermux-debian.XXXXXXXX")
-trap 'rm -rf -- "$work"' EXIT
+  ffmpeg libgtk-4-1 python3-gi python3-numpy python3-aiohttp python3-certifi python3-tabulate python3-typing-extensions \
+  pulseaudio-utils wl-clipboard xclip espeak-ng
 curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
   https://github.com/anaxonda/uttermux-linux/raw/main/scripts/install-source -o "$work/install-source"
-bash "$work/install-source"
+UTTERMUX_SPEECHD_MODULE_DIR=/usr/lib/speech-dispatcher-modules bash "$work/install-source"

@@ -62,6 +62,16 @@ def main() -> int:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
     if "packaging/arch/PKGBUILD.in" not in workflow:
         errors.append("release workflow does not render the Arch package template")
+    for artifact in ("arch-package", "debian-package", "packaging/debian/build-deb"):
+        if artifact not in workflow: errors.append(f"release workflow is missing {artifact}")
+    install_script = installer.read_text()
+    debian_installer = (ROOT / "scripts/install-debian").read_text()
+    if "arch-x86_64.pkg.tar.zst" not in install_script:
+        errors.append("Arch installer does not prefer the published binary package")
+    if "debian-amd64.deb" not in debian_installer:
+        errors.append("Debian installer does not prefer the published binary package")
+    if "/usr/lib/speech-dispatcher-modules" not in (ROOT / "packaging/debian/build-deb").read_text():
+        errors.append("Debian package does not use the distribution module loader path")
     espeak_workaround = "'/^[[:space:]]*-Wno-format$/d'"
     if espeak_workaround not in template or espeak_workaround not in (ROOT / "scripts/install-source").read_text():
         errors.append("installers lack the GCC 16 bundled-eSpeak format-security workaround")

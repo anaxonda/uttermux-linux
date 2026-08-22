@@ -15,7 +15,8 @@ The companion [Android system TTS engine](https://github.com/anaxonda/uttermux-a
 uses the same catalog contract and routing concepts.
 
 > **Status:** beta. Arch Linux is the development platform; Debian trixie and
-> alternate-prefix source builds run in CI. No model weights are bundled.
+> alternate-prefix source builds run in CI. Release automation publishes
+> checksum-verified Arch and Debian x86-64 packages. No neural model weights are bundled.
 
 ![UtterMux desktop voice catalog](docs/screenshots/linux-voices.png)
 
@@ -53,6 +54,8 @@ The GTK application and CLI operate on the same catalog and configuration.
 - Persistent local models, bounded LRU model caching, and optional startup
   preload for the active voice.
 - Local and cloud voices in one searchable catalog.
+- eSpeak NG system voices for fast, small, multilingual offline speech without
+  downloading a neural model.
 - BCP-47 language metadata, automatic language detection, per-language routes,
   and configurable fallback order.
 - System-wide selected-text reading on Wayland and X11.
@@ -82,6 +85,7 @@ means a reference recording must be configured before a system voice exists.
 
 | Family | Linux | Android | Current boundary |
 | --- | --- | --- | --- |
+| eSpeak NG | Installed system engine; 100+ languages/accents | Embedded engine and language data | Formant synthesis; no model download |
 | Piper/VITS | Yes; generated pinned catalog | Yes; generated pinned catalog | Fixed voices |
 | Inflect Nano/Micro | Nano | Nano and Micro | Fixed English voices |
 | Kitten | FP16 v0.1 and INT8 v0.8 | FP16 v0.1 and INT8 v0.8 | Fixed English voices |
@@ -170,17 +174,18 @@ See [Qwen benchmark notes](docs/qwen-benchmarks.md).
 
 ### Arch Linux
 
-Install the latest GitHub release with its checksum-resolved Arch package:
+Install the latest GitHub release:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
   https://github.com/anaxonda/uttermux-linux/raw/main/install.sh | bash
 ```
 
-The script detects Arch or a Debian-family system. On Arch it downloads the
-release `PKGBUILD`, rejects unresolved checksums,
-builds the pinned sherpa-onnx dependency, installs through `makepkg`, runs
-`uttermux setup`, and finishes with `uttermux doctor`. Review
+The script downloads and verifies the prebuilt x86-64 package, installs it with
+`pacman`, runs `uttermux setup`, and finishes with `uttermux doctor`. On an
+architecture without a published binary it verifies the release `PKGBUILD` and
+builds the pinned sources with `makepkg`. Set `UTTERMUX_FORCE_SOURCE=1` to
+choose that path explicitly. Review
 [`install.sh`](install.sh) before piping it to a shell.
 
 To download and verify every pinned Arch source without building or installing,
@@ -188,9 +193,9 @@ run the command with `UTTERMUX_INSTALL_CHECK_ONLY=1`.
 
 ### Debian and Ubuntu
 
-The same one-line command installs build/runtime packages through `apt`, builds
-the pinned sherpa-onnx and UtterMux releases, runs the test suite, and installs
-under `/usr/local`:
+The same one-line command verifies and installs the published amd64 `.deb` with
+`apt`. Other architectures fall back to installing build dependencies and the
+verified release-source build under `/usr/local`:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
@@ -410,14 +415,14 @@ that example. The GTK GUI does not yet import custom manifests.
 
 ## Distribution support
 
-Arch Linux is currently the only locally tested and packaged desktop target. The core
-uses standard CMake, GTK 4, Speech Dispatcher 0.12+, ONNX Runtime, Rubber Band,
-Python, and systemd user services, so it should be portable to current
-systemd-based distributions. Debian trixie source builds and staged installs
-are exercised in CI, but no `.deb` repository is published yet. Ubuntu,
-Fedora, openSUSE, NixOS, Flatpak, and non-systemd sessions are not yet
-release-supported. `/usr/local` and alternate `lib64` prefixes are exercised by
-the portable-prefix CI job.
+Arch Linux is the development target. Tagged releases build an x86-64 Arch
+package and an amd64 Debian trixie package after the source tests pass. Debian's
+multiarch helper layout and `/usr/lib/speech-dispatcher-modules` loader path are
+validated separately from Arch. The source installer supports other current
+systemd-based distributions after their C++17, GTK 4, Speech Dispatcher 0.12+,
+Rubber Band, FFmpeg, and Python dependencies are installed. Fedora, openSUSE,
+NixOS, Flatpak, and non-systemd sessions do not yet have native packages.
+`/usr/local` and alternate `lib64` prefixes are exercised by CI.
 
 ## Language routing
 

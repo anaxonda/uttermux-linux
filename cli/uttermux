@@ -14,6 +14,7 @@ import socket
 import statistics
 import struct
 import subprocess
+import sysconfig
 import sys
 import tempfile
 import time
@@ -77,11 +78,13 @@ def installed_data_file(relative: str) -> Path:
 
 
 def installed_helper(name: str) -> Path:
+    multiarch = sysconfig.get_config_var("MULTIARCH") or ""
     candidates = (install_prefix() / "lib/uttermux" / name,
                   install_prefix() / "lib64/uttermux" / name,
                   install_prefix() / "libexec/uttermux" / name,
                   Path("/usr/lib/uttermux") / name, Path("/usr/lib64/uttermux") / name,
-                  Path("/usr/libexec/uttermux") / name)
+                  Path("/usr/libexec/uttermux") / name,
+                  Path("/usr/lib") / multiarch / "uttermux" / name)
     return next((path for path in candidates if path.exists()), candidates[0])
 
 
@@ -426,13 +429,13 @@ def cmd_catalog(_args):
                 "gender": voice.get("gender", ""), "preview": "generated" if voice_id in ready else
                 ("sample" if voice.get("preview_url") else "unavailable"),
                 "previewUrl": voice.get("preview_url", ""), "ready": voice_id in ready})
-    provider_names = {"local": ("Local models", False, "free"), "qwen": ("Qwen local", False, "free"),
+    provider_names = {"local": ("Local models", False, "free"), "espeak": ("eSpeak NG", False, "free"), "qwen": ("Qwen local", False, "free"),
                       "moss": ("MOSS local", False, "free"),
                       "edge": ("Microsoft Edge", True, "free"),
                       "elevenlabs": ("ElevenLabs", True, "subscription"), "grok": ("xAI", True, "metered")}
     provider_names.update({key: (title, True, "metered") for key, (title, _fields) in CLOUD_PROVIDER_FIELDS.items()})
     providers = [{"id": key, "name": values[0], "network": values[1], "cost": values[2],
-                  "enabled": key in {"local", "qwen", "moss"} or bool(read_config().get("providers", {}).get(key, {}).get("enabled"))}
+                  "enabled": key in {"local", "espeak", "qwen", "moss"} or bool(read_config().get("providers", {}).get(key, {}).get("enabled"))}
                  for key, values in provider_names.items()]
     local_ids = {voice["id"] for voice in catalog_voices}
     for record in ready.values():
@@ -451,7 +454,7 @@ def cmd_catalog(_args):
             continue
         model_id = f"{record['provider']}/{record['model']}"
         if not any(model["id"] == model_id for model in models):
-            local_companion = record["provider"] in {"qwen", "moss"}
+            local_companion = record["provider"] in {"espeak", "qwen", "moss"}
             models.append({"id": model_id, "providerId": record["provider"], "library": record["model"],
                 "version": "companion" if local_companion else "service", "engine": record["provider"],
                 "location": "on-device" if local_companion else "cloud",

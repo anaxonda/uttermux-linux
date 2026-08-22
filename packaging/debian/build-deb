@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/../.." && pwd)
+release_version=${1:?usage: packaging/debian/build-deb VERSION [OUTPUT-DIR]}
+output=${2:-$root/dist}
+jobs=${UTTERMUX_BUILD_JOBS:-2}
+[[ $jobs =~ ^[1-9][0-9]*$ ]] || { printf '%s\n' 'UTTERMUX_BUILD_JOBS must be a positive integer.' >&2; exit 2; }
+command -v dpkg-deb >/dev/null || { printf '%s\n' 'dpkg-deb is required.' >&2; exit 2; }
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/uttermux-deb-build.XXXXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+stage="$work/stage"
+mkdir -p "$stage" "$output"
+
+sherpa_version=1.13.6
+curl --proto '=https' --tlsv1.2 -fL \
+  "https://github.com/k2-fsa/sherpa-onnx/archive/refs/tags/v$sherpa_version.tar.gz" \
+  -o "$work/sherpa.tar.gz"
+printf '%s  %s\n' 78f5d10f957d2de1867a1e08395e9ec2ec388911c853dd141887396667f3ff34 "$work/sherpa.tar.gz" | sha256sum --check
+tar -xzf "$work/sherpa.tar.gz" -C "$work"
+sed -i '/^[[:space:]]*-Wno-format$/d' "$work/sherpa-onnx-$sherpa_version/cmake/espeak-ng-for-piper.cmake"
+cmake -S "$work/sherpa-onnx-$sherpa_version" -B "$work/sherpa-build" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_SHARED_LIBS=ON \
+  -DSHERPA_ONNX_ENABLE_TTS=ON -DSHERPA_ONNX_ENABLE_C_API=ON \
+  -DSHERPA_ONNX_ENABLE_BINARY=OFF -DSHERPA_ONNX_ENABLE_PYTHON=OFF \
+  -DSHERPA_ONNX_ENABLE_TESTS=OFF -DSHERPA_ONNX_ENABLE_CHECK=OFF \
+  -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF \
+  -DSHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION=OFF \
+  -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=OFF
+cmake --build "$work/sherpa-build" --parallel "$jobs"
+DESTDIR="$stage" cmake --install "$work/sherpa-build"
+
+cmake -S "$root" -B "$work/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/usr -DSPEECHD_MODULE_DIR=/usr/lib/speech-dispatcher-modules \
+  -DBUILD_TESTING=OFF
+cmake --build "$work/build" --parallel "$jobs"
+DESTDIR="$stage" cmake --install "$work/build"
+
+mkdir -p "$stage/usr/lib/uttermux/vendor"
+edge="$work/edge_tts-7.2.8.whl"
+langid="$work/py3langid-0.3.0.whl"
+curl --proto '=https' --tlsv1.2 -fL https://files.pythonhosted.org/packages/8c/2b/a8cb687b92a2690d2ad171f0c2fd1c8f18690363cca7618bab2bbe4cdf2b/edge_tts-7.2.8-py3-none-any.whl -o "$edge"
+curl --proto '=https' --tlsv1.2 -fL https://files.pythonhosted.org/packages/9d/1c/8212ea872d236af0aea37043fb6feeaa9a43449183782b19d342f8ddd343/py3langid-0.3.0-py3-none-any.whl -o "$langid"
+printf '%s  %s\n' 361fe48ce7ef613adbe30f664e3765dd71029c6cb57427279eff8ad6df2eb211 "$edge" | sha256sum --check
+printf '%s  %s\n' 38f022eec31cf9a2bf6f142acb2a9b350fd7d0d5ae7762b1392c6d3567401fd3 "$langid" | sha256sum --check
+python3 -m zipfile -e "$edge" "$stage/usr/lib/uttermux/vendor"
+python3 -m zipfile -e "$langid" "$stage/usr/lib/uttermux/vendor"
+
+debian_version=${release_version//-/'~'}
+mkdir -p "$stage/DEBIAN"
+cat > "$stage/DEBIAN/control" <<EOF
+Package: uttermux
+Version: $debian_version
+Architecture: amd64
+Maintainer: UtterMux contributors <noreply@uttermux.invalid>
+Section: sound
+Priority: optional
+Depends: speech-dispatcher (>= 0.12), libspeechd2, libspeechd-module0, librubberband2, python3, python3-gi, gir1.2-gtk-4.0, python3-numpy, python3-aiohttp, python3-certifi, python3-tabulate, python3-typing-extensions, ffmpeg, pulseaudio-utils, curl, espeak-ng
+Description: local and online TTS broker for Speech Dispatcher
+ UtterMux presents local neural engines, eSpeak NG, and online providers through
+ a persistent broker and a single Speech Dispatcher output module.
+EOF
+asset="$output/uttermux-$release_version-debian-amd64.deb"
+dpkg-deb --root-owner-group --build "$stage" "$asset"
+(cd "$output" && sha256sum "${asset##*/}" > "${asset##*/}.sha256")
+printf '%s\n' "$asset"

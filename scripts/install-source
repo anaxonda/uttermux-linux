@@ -64,8 +64,12 @@ cmake -S "$work/sherpa-onnx-$sherpa_version" -B "$work/sherpa-build" -G Ninja \
   -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=OFF
 cmake --build "$work/sherpa-build" --parallel "$build_jobs"
 
+module_args=()
+if [[ -n ${UTTERMUX_SPEECHD_MODULE_DIR:-} ]]; then
+  module_args+=("-DSPEECHD_MODULE_DIR=$UTTERMUX_SPEECHD_MODULE_DIR")
+fi
 cmake -S "$source_root" -B "$work/build" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix"
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" "${module_args[@]}"
 cmake --build "$work/build" --parallel "$build_jobs"
 ctest --test-dir "$work/build" --output-on-failure
 sudo cmake --install "$work/sherpa-build"

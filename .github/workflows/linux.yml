@@ -25,7 +25,7 @@ jobs:
         run: |
           python scripts/catalog/build_catalog.py --piper-source catalog/sources/piper.json --check
           python scripts/release-audit.py --ci
-          bash -n install.sh scripts/install-debian scripts/install-source
+          bash -n install.sh scripts/install-debian scripts/install-source packaging/debian/build-deb
       - name: Smoke-test deterministic screenshot capture
         run: |
           scripts/capture-linux-screenshots "$RUNNER_TEMP/uttermux-screenshots"
@@ -56,8 +56,10 @@ jobs:
           g++ pkg-config python3 libspeechd-dev libspeechd-module0
           librubberband-dev ffmpeg
       - uses: actions/checkout@v7
-      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DSPEECHD_MODULE_DIR=/usr/lib/speech-dispatcher-modules
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
       - run: DESTDIR="$PWD/stage" cmake --install build
-      - run: test -x stage/usr/local/lib/speech-dispatcher/speech-dispatcher-modules/sd_uttermux
+      - run: test -x stage/usr/local/lib/speech-dispatcher-modules/sd_uttermux

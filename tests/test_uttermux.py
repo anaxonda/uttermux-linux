@@ -35,6 +35,24 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((kind, request), (self.u.SYNTHESIZE, 19))
         self.assertEqual(self.u.split_fields(payload), ["voice", "1", "hello", "fr-FR"])
 
+    def test_espeak_discovers_languages_and_streams_pcm(self):
+        listing = "Pty Language Age/Gender VoiceName File\n 5 en-us --/M English_America gmw/en-US\n 5 fr --/F French roa/fr\n"
+        with mock.patch.object(self.u.shutil, "which", return_value="/usr/bin/espeak-ng"), \
+             mock.patch.object(self.u.subprocess, "run", return_value=mock.Mock(stdout=listing)):
+            provider = self.u.EspeakProvider({})
+        voices = list(provider.voices())
+        self.assertEqual([item[0] for item in voices], ["espeak/en-us", "espeak/fr"])
+        header = bytearray(44); header[:4] = b"RIFF"; header[8:12] = b"WAVE"
+        struct.pack_into("<I", header, 24, 22050)
+        process = mock.MagicMock(); process.stdin = mock.MagicMock()
+        process.stdout.read.side_effect = [bytes(header), b"pcm", b""]
+        process.stderr.read.return_value = b""; process.poll.return_value = 0; process.wait.return_value = 0
+        emitted = []
+        with mock.patch.object(self.u.subprocess, "Popen", return_value=process):
+            provider.synthesize("espeak/en-us", "Hello", 1.0, emitted.append, threading.Event())
+        self.assertEqual([self.u.HEADER.unpack_from(raw)[2] for raw in emitted],
+                         [self.u.AUDIO_START, self.u.AUDIO])
+
     def test_automatic_tuning_is_engine_and_hardware_bounded(self):
         self.assertEqual(self.u.automatic_threads("kokoro", 1), 1)
         self.assertEqual(self.u.automatic_threads("kokoro", 32), 4)

@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import struct
 import subprocess
@@ -471,6 +472,58 @@ class EdgeProvider:
         asyncio.run(generate())
 
 
+class EspeakProvider:
+    """Small, offline system provider backed by the installed eSpeak NG."""
+
+    def __init__(self, _config: dict):
+        self.binary = shutil.which("espeak-ng")
+        if not self.binary: raise RuntimeError("espeak-ng is not installed")
+        result = subprocess.run([self.binary, "--voices"], text=True,
+                                capture_output=True, check=True)
+        self._voices = {}
+        for line in result.stdout.splitlines()[1:]:
+            columns = line.split()
+            if len(columns) < 5 or columns[1] == "variant": continue
+            language, gender, name = normalize_language(columns[1]), columns[2], columns[3]
+            self._voices[columns[1]] = {"language": language,
+                "name": name.replace("_", " "), "gender": gender.split("/")[-1]}
+        if not self._voices: raise RuntimeError("espeak-ng reported no voices")
+
+    def voices(self):
+        for selector, voice in sorted(self._voices.items()):
+            label = f"{voice['name']} · eSpeak NG"
+            yield (f"espeak/{selector}", label, voice["language"], "espeak",
+                   "eSpeak NG", (voice["language"],), True)
+
+    def synthesize(self, voice_id, text, speed, emit, cancelled, _language=""):
+        selector = voice_id.removeprefix("espeak/")
+        if selector not in self._voices: raise ValueError(f"unknown eSpeak NG voice: {voice_id}")
+        rate = max(80, min(450, round(175 * speed)))
+        process = subprocess.Popen([self.binary, "--stdout", "-v", selector, "-s", str(rate)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert process.stdin and process.stdout and process.stderr
+        try:
+            process.stdin.write(text.encode("utf-8")); process.stdin.close()
+            header = process.stdout.read(44)
+            if len(header) != 44 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+                raise RuntimeError("eSpeak NG returned an invalid WAV stream")
+            sample_rate = struct.unpack_from("<I", header, 24)[0]
+            emit(packet(AUDIO_START, 0, struct.pack("<IB", sample_rate, 2)))
+            while not cancelled.is_set():
+                chunk = process.stdout.read(32768)
+                if not chunk: break
+                emit(packet(AUDIO, 0, chunk))
+        finally:
+            if cancelled.is_set() and process.poll() is None: process.terminate()
+            try:
+                return_code = process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                return_code = process.wait()
+        if return_code and not cancelled.is_set():
+            raise RuntimeError("eSpeak NG failed: " + process.stderr.read().decode(errors="replace").strip())
+
+
 class ElevenLabsProvider:
     def __init__(self, config: dict):
         self.config = config
@@ -922,7 +975,7 @@ class Broker:
                 self.voice_meta[voice_id] = (voice_id, f"{profile['name']} · {profile['engine'].title()}",
                     profile["language"], "local", model["id"], (profile["language"],), True)
         provider_config = self.config.get("providers", {})
-        provider_types = dict((("edge", EdgeProvider), ("elevenlabs", ElevenLabsProvider),
+        provider_types = dict((("espeak", EspeakProvider), ("edge", EdgeProvider), ("elevenlabs", ElevenLabsProvider),
                                ("grok", GrokProvider), ("qwen", QwenProvider),
                                ("moss", MossProvider)))
         provider_types.update(CLOUD_PROVIDERS)
@@ -947,7 +1000,7 @@ class Broker:
             if provider_name in {"qwen", "moss"}:
                 cfg = dict(cfg)
                 cfg.setdefault("idle_seconds", self.config.get("external_idle_seconds", 120))
-            if not cfg.get("enabled", provider_name in {"qwen", "moss"}):
+            if not cfg.get("enabled", provider_name in {"espeak", "qwen", "moss"}):
                 continue
             try:
                 provider = provider_type(cfg)

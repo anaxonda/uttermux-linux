@@ -12,7 +12,7 @@ if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
 fi
 
 if [[ -r /etc/debian_version ]] && command -v apt-get >/dev/null; then
-  printf '%s\n' 'Detected Debian/Ubuntu; starting the source package installer.'
+  printf '%s\n' 'Detected Debian/Ubuntu; starting the package installer.'
   curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
     "$repo/raw/main/scripts/install-debian" -o "$work/install-debian"
   bash "$work/install-debian"
@@ -31,7 +31,7 @@ for command in curl makepkg; do
   }
 done
 
-printf '%s\n' 'Downloading the signed-release PKGBUILD…'
+printf '%s\n' 'Resolving the latest published UtterMux release…'
 api=https://api.github.com/repos/anaxonda/uttermux-linux/releases?per_page=10
 curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
   "$api" -o "$work/releases.json"
@@ -40,6 +40,29 @@ if [[ ! "$tag" =~ ^v[0-9A-Za-z._-]+$ ]]; then
   printf '%s\n' 'Could not resolve a safe UtterMux release tag.' >&2
   exit 1
 fi
+version=${tag#v}
+machine=$(uname -m)
+if [[ $machine == x86_64 && ${UTTERMUX_FORCE_SOURCE:-0} != 1 ]]; then
+  package="uttermux-$version-arch-x86_64.pkg.tar.zst"
+  printf 'Downloading prebuilt Arch package %s…\n' "$package"
+  if curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+      "$repo/releases/download/$tag/$package" -o "$work/$package" &&
+     curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+      "$repo/releases/download/$tag/$package.sha256" -o "$work/$package.sha256"; then
+    (cd "$work" && sha256sum --check "$package.sha256")
+    if [[ ${UTTERMUX_INSTALL_CHECK_ONLY:-0} == 1 ]]; then
+      printf 'Verified Arch binary package: %s\n' "$tag"
+      exit 0
+    fi
+    sudo pacman -U --needed --noconfirm "$work/$package"
+    uttermux setup
+    uttermux doctor
+    printf '%s\n' 'UtterMux is installed. Restart applications that cache system voice lists.'
+    exit 0
+  fi
+  printf '%s\n' 'No prebuilt package was published for this release; falling back to a source package build.' >&2
+fi
+printf '%s\n' 'Downloading the checksum-resolved release PKGBUILD…'
 pkgbuild_url="$repo/releases/download/$tag/PKGBUILD"
 curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
   "$pkgbuild_url" -o "$work/PKGBUILD"
