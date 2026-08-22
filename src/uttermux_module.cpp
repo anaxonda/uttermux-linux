@@ -87,38 +87,61 @@ const BrokerVoice *resolve_voice(const std::string &name) {
   return nullptr;
 }
 
-void output_pcm(const std::vector<int16_t> &pcm, int sample_rate) {
-  if (pcm.empty()) return;
-  const std::string rate_argument = "--rate=" + std::to_string(sample_rate);
-  int input[2];
-  if (::pipe(input) != 0) throw std::runtime_error("cannot create audio pipe");
-  pid_t child = ::fork();
-  if (child < 0) {
-    ::close(input[0]); ::close(input[1]);
-    throw std::runtime_error("cannot start paplay");
+class PcmPlayer {
+ public:
+  explicit PcmPlayer(int sample_rate) {
+    rate_argument_ = "--rate=" + std::to_string(sample_rate);
+    int input[2];
+    if (::pipe(input) != 0) throw std::runtime_error("cannot create audio pipe");
+    child_ = ::fork();
+    if (child_ < 0) {
+      ::close(input[0]); ::close(input[1]);
+      throw std::runtime_error("cannot start paplay");
+    }
+    if (child_ == 0) {
+      ::dup2(input[0], STDIN_FILENO); ::close(input[0]); ::close(input[1]);
+      ::execlp("paplay", "paplay", "--raw", "--format=s16le", "--channels=1",
+               rate_argument_.c_str(), "--stream-name=UtterMux", static_cast<char *>(nullptr));
+      _exit(127);
+    }
+    ::close(input[0]); input_ = input[1]; player_pid.store(child_);
   }
-  if (child == 0) {
-    ::dup2(input[0], STDIN_FILENO); ::close(input[0]); ::close(input[1]);
-    ::execlp("paplay", "paplay", "--raw", "--format=s16le", "--channels=1",
-             rate_argument.c_str(), "--stream-name=UtterMux", static_cast<char *>(nullptr));
-    _exit(127);
+
+  ~PcmPlayer() {
+    if (input_ >= 0) ::close(input_);
+    if (child_ > 0) {
+      ::kill(child_, SIGTERM);
+      while (::waitpid(child_, nullptr, 0) < 0 && errno == EINTR) {}
+      pid_t expected = child_; player_pid.compare_exchange_strong(expected, -1);
+    }
   }
-  ::close(input[0]); player_pid.store(child);
-  const auto *bytes = reinterpret_cast<const uint8_t *>(pcm.data());
-  size_t remaining = pcm.size() * sizeof(int16_t);
-  while (remaining && !stopped.load()) {
-    ssize_t written = ::write(input[1], bytes, remaining);
-    if (written > 0) { bytes += written; remaining -= static_cast<size_t>(written); }
-    else if (written < 0 && errno == EINTR) continue;
-    else break;
+
+  void write(const std::vector<int16_t> &pcm) {
+    const auto *bytes = reinterpret_cast<const uint8_t *>(pcm.data());
+    size_t remaining = pcm.size() * sizeof(int16_t);
+    while (remaining && !stopped.load()) {
+      ssize_t written = ::write(input_, bytes, remaining);
+      if (written > 0) { bytes += written; remaining -= static_cast<size_t>(written); }
+      else if (written < 0 && errno == EINTR) continue;
+      else break;
+    }
   }
-  ::close(input[1]);
-  int status = 0;
-  while (::waitpid(child, &status, 0) < 0 && errno == EINTR) {}
-  player_pid.compare_exchange_strong(child, -1);
-  if (!stopped.load() && (!WIFEXITED(status) || WEXITSTATUS(status) != 0))
-    throw std::runtime_error("paplay failed");
-}
+
+  void finish() {
+    if (input_ >= 0) { ::close(input_); input_ = -1; }
+    int status = 0;
+    while (::waitpid(child_, &status, 0) < 0 && errno == EINTR) {}
+    pid_t expected = child_; player_pid.compare_exchange_strong(expected, -1);
+    child_ = -1;
+    if (!stopped.load() && (!WIFEXITED(status) || WEXITSTATUS(status) != 0))
+      throw std::runtime_error("paplay failed");
+  }
+
+ private:
+  pid_t child_ = -1;
+  int input_ = -1;
+  std::string rate_argument_;
+};
 
 void speak_worker(std::string text, std::string voice_id, std::string language,
                   int rate, int pitch, int volume, uint64_t request) {
@@ -126,9 +149,9 @@ void speak_worker(std::string text, std::string voice_id, std::string language,
   int sample_rate = 0;
   uint8_t sample_format = 1;
   std::unique_ptr<sdsherpa::AudioProcessor> processor;
-  std::vector<int16_t> utterance_pcm;
-  auto append_pcm = [&](std::vector<int16_t> pcm) {
-    utterance_pcm.insert(utterance_pcm.end(), pcm.begin(), pcm.end());
+  std::unique_ptr<PcmPlayer> player;
+  auto play_pcm = [&](std::vector<int16_t> pcm) {
+    if (!pcm.empty() && player) player->write(pcm);
   };
   try {
     auto payload = fields({voice_id, std::to_string(sdsherpa::rate_to_speed(rate)), text, language});
@@ -150,13 +173,15 @@ void speak_worker(std::string text, std::string voice_id, std::string language,
         if (sample_format != 1 && sample_format != 2) throw std::runtime_error("unsupported PCM format");
         if (sample_rate < 8000 || sample_rate > 192000) throw std::runtime_error("invalid sample rate");
         processor = std::make_unique<sdsherpa::AudioProcessor>(sample_rate, pitch, volume);
+        player = std::make_unique<PcmPlayer>(sample_rate);
+        module_report_event_begin(); began = true;
       } else if (response.type == Message::Audio) {
         if (!processor) throw std::runtime_error("PCM arrived before its format");
         if (sample_format == 1) {
           if (response.payload.size() % sizeof(float)) throw std::runtime_error("invalid float PCM packet");
           std::vector<float> samples(response.payload.size() / sizeof(float));
           std::memcpy(samples.data(), response.payload.data(), response.payload.size());
-          append_pcm(processor->process(samples.data(), static_cast<int32_t>(samples.size()), false));
+          play_pcm(processor->process(samples.data(), static_cast<int32_t>(samples.size()), false));
         } else {
           if (response.payload.size() % sizeof(int16_t)) throw std::runtime_error("invalid s16 PCM packet");
           std::vector<int16_t> samples(response.payload.size() / sizeof(int16_t));
@@ -164,17 +189,13 @@ void speak_worker(std::string text, std::string voice_id, std::string language,
           std::vector<float> converted(samples.size());
           std::transform(samples.begin(), samples.end(), converted.begin(),
                          [](int16_t value) { return static_cast<float>(value) / 32768.0f; });
-          append_pcm(processor->process(converted.data(), static_cast<int32_t>(converted.size()), false));
+          play_pcm(processor->process(converted.data(), static_cast<int32_t>(converted.size()), false));
         }
       } else if (response.type == Message::Done) {
         if (processor) {
           float zero = 0;
-          append_pcm(processor->process(&zero, 0, true));
-          // Keep one player and one completion boundary per utterance. This
-          // also prevents the broker's callback packet boundaries from
-          // becoming audible playback boundaries.
-          module_report_event_begin(); began = true;
-          output_pcm(utterance_pcm, sample_rate);
+          play_pcm(processor->process(&zero, 0, true));
+          player->finish();
         }
         success = true; break;
       } else if (response.type == Message::Error) {

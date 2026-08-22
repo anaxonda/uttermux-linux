@@ -590,7 +590,7 @@ class ElevenLabsProvider:
             with urllib.request.urlopen(request, timeout=30) as response:
                 started = False
                 while not cancelled.is_set():
-                    chunk = response.read(32768)
+                    chunk = response.read1(32768)
                     if not chunk:
                         break
                     if not started:
@@ -659,7 +659,7 @@ class GrokProvider:
             with urllib.request.urlopen(request, timeout=60) as response:
                 started = False
                 while not cancelled.is_set():
-                    chunk = response.read(32768)
+                    chunk = response.read1(32768)
                     if not chunk:
                         break
                     if not started:
