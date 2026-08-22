@@ -172,35 +172,39 @@ See [Qwen benchmark notes](docs/qwen-benchmarks.md).
 
 ## Install
 
-### Arch Linux
-
-Install the latest GitHub release:
+`install.sh` is the Linux distribution dispatcher, not an Arch-only installer.
+It selects the packaged Arch or Debian/Ubuntu path after inspecting the host.
+For another distribution it prints the generic source-installer command without
+changing the system.
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
   https://github.com/anaxonda/uttermux-linux/raw/main/install.sh | bash
 ```
 
-The script downloads and verifies the prebuilt x86-64 package, installs it with
+Review [`install.sh`](install.sh) before piping it to a shell.
+
+### Arch Linux
+
+The dispatcher downloads and verifies the prebuilt x86-64 package, installs it with
 `pacman`, runs `uttermux setup`, and finishes with `uttermux doctor`. On an
 architecture without a published binary it verifies the release `PKGBUILD` and
 builds the pinned sources with `makepkg`. Set `UTTERMUX_FORCE_SOURCE=1` to
-choose that path explicitly. Review
-[`install.sh`](install.sh) before piping it to a shell.
+choose that path explicitly. It can also migrate files from an earlier
+unpackaged `cmake --install` installation: only unowned paths contained in the
+verified UtterMux package are adopted; files owned by another package remain
+protected by pacman.
 
 To download and verify every pinned Arch source without building or installing,
 run the command with `UTTERMUX_INSTALL_CHECK_ONLY=1`.
 
 ### Debian and Ubuntu
 
-The same one-line command verifies and installs the published amd64 `.deb` with
-`apt`. Other architectures fall back to installing build dependencies and the
-verified release-source build under `/usr/local`:
-
-```sh
-curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/anaxonda/uttermux-linux/raw/main/install.sh | bash
-```
+The dispatcher verifies and installs the published amd64 `.deb` with `apt`.
+Other architectures fall back to installing build dependencies and the
+verified release-source build under `/usr/local`. Debian package installation
+does not have pacman's unowned-file conflict behavior; `dpkg` can adopt matching
+unowned paths while continuing to reject conflicts owned by another package.
 
 Review [`scripts/install-debian`](scripts/install-debian) and
 [`scripts/install-source`](scripts/install-source) before running them.

@@ -31,7 +31,7 @@ install_arch_package() {
 }
 
 if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
-  printf '%s\n' 'Run this installer as your normal user; makepkg will invoke sudo when needed.' >&2
+  printf '%s\n' 'Run this installer as your normal user; it invokes sudo only when installation is required.' >&2
   exit 2
 fi
 
