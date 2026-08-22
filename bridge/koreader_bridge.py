@@ -24,6 +24,104 @@ HEADER = struct.Struct("<IHHQI")
 LIST_VOICES, VOICE, SYNTHESIZE, AUDIO_START, AUDIO, DONE, ERROR = 2, 3, 4, 5, 6, 7, 9
 CACHE: OrderedDict[str, "Audio"] = OrderedDict()
 LOCK = threading.Lock()
+ACTIVE_AUDIO = None
+MEDIA = None
+
+
+class MediaSession:
+    """Expose bridge-owned playback through desktop MPRIS controls."""
+
+    XML = """<node>
+      <interface name="org.mpris.MediaPlayer2">
+        <method name="Raise"/><method name="Quit"/>
+        <property name="CanQuit" type="b" access="read"/>
+        <property name="CanRaise" type="b" access="read"/>
+        <property name="HasTrackList" type="b" access="read"/>
+        <property name="Identity" type="s" access="read"/>
+        <property name="DesktopEntry" type="s" access="read"/>
+        <property name="SupportedUriSchemes" type="as" access="read"/>
+        <property name="SupportedMimeTypes" type="as" access="read"/>
+      </interface>
+      <interface name="org.mpris.MediaPlayer2.Player">
+        <method name="Next"/><method name="Previous"/><method name="Pause"/>
+        <method name="PlayPause"/><method name="Stop"/><method name="Play"/>
+        <property name="PlaybackStatus" type="s" access="read"/>
+        <property name="Rate" type="d" access="read"/>
+        <property name="Metadata" type="a{sv}" access="read"/>
+        <property name="Volume" type="d" access="read"/>
+        <property name="Position" type="x" access="read"/>
+        <property name="MinimumRate" type="d" access="read"/>
+        <property name="MaximumRate" type="d" access="read"/>
+        <property name="CanGoNext" type="b" access="read"/>
+        <property name="CanGoPrevious" type="b" access="read"/>
+        <property name="CanPlay" type="b" access="read"/>
+        <property name="CanPause" type="b" access="read"/>
+        <property name="CanSeek" type="b" access="read"/>
+        <property name="CanControl" type="b" access="read"/>
+      </interface>
+    </node>"""
+
+    def __init__(self):
+        self.status, self.connection = "Stopped", None
+        threading.Thread(target=self._run, name="uttermux-mpris", daemon=True).start()
+
+    def _run(self):
+        try:
+            import gi
+            gi.require_version("Gio", "2.0")
+            from gi.repository import Gio, GLib
+            self.Gio, self.GLib = Gio, GLib
+            self.loop = GLib.MainLoop()
+            Gio.bus_own_name(Gio.BusType.SESSION, "org.mpris.MediaPlayer2.uttermux",
+                             Gio.BusNameOwnerFlags.NONE, self._bus_acquired, None, None)
+            self.loop.run()
+        except (ImportError, ValueError) as error:
+            print(f"UtterMux: MPRIS unavailable: {error}", flush=True)
+
+    def _bus_acquired(self, connection, _name):
+        self.connection = connection
+        node = self.Gio.DBusNodeInfo.new_for_xml(self.XML)
+        for interface in node.interfaces:
+            connection.register_object("/org/mpris/MediaPlayer2", interface,
+                                       self._method, self._property, None)
+
+    def _method(self, _connection, _sender, _path, interface, method, _parameters, invocation):
+        audio = ACTIVE_AUDIO
+        if interface.endswith(".Player") and audio:
+            if method == "Pause": audio.stop()
+            elif method == "Play": audio.play()
+            elif method == "PlayPause": audio.stop() if audio.remaining()[0] else audio.play()
+            elif method == "Stop": audio.stop(reset=True)
+        invocation.return_value(None)
+
+    def _property(self, _connection, _sender, _path, interface, name):
+        V = self.GLib.Variant
+        if interface == "org.mpris.MediaPlayer2":
+            values = {"CanQuit": V("b", False), "CanRaise": V("b", False),
+                      "HasTrackList": V("b", False), "Identity": V("s", "UtterMux"),
+                      "DesktopEntry": V("s", "io.uttermux.App"),
+                      "SupportedUriSchemes": V("as", []), "SupportedMimeTypes": V("as", [])}
+        else:
+            active = ACTIVE_AUDIO
+            position = 0 if not active else int((active.duration - active.remaining()[1]) * 1_000_000)
+            values = {"PlaybackStatus": V("s", self.status), "Rate": V("d", 1.0),
+                      "Metadata": V("a{sv}", {"mpris:trackid": V("o", "/org/uttermux/Track"),
+                                                "xesam:title": V("s", "Spoken text"),
+                                                "xesam:artist": V("as", ["UtterMux"])}),
+                      "Volume": V("d", 1.0), "Position": V("x", position),
+                      "MinimumRate": V("d", 1.0), "MaximumRate": V("d", 1.0),
+                      "CanGoNext": V("b", False), "CanGoPrevious": V("b", False),
+                      "CanPlay": V("b", active is not None), "CanPause": V("b", active is not None),
+                      "CanSeek": V("b", False), "CanControl": V("b", True)}
+        return values.get(name)
+
+    def update(self, status):
+        self.status = status
+        if not self.connection: return
+        self.connection.emit_signal(None, "/org/mpris/MediaPlayer2",
+            "org.freedesktop.DBus.Properties", "PropertiesChanged",
+            self.GLib.Variant("(sa{sv}as)", ("org.mpris.MediaPlayer2.Player",
+                {"PlaybackStatus": self.GLib.Variant("s", status)}, [])))
 
 
 def broker_socket():
@@ -59,12 +157,15 @@ class Audio:
         return output.getvalue()
 
     def play(self):
+        global ACTIVE_AUDIO
         if self.process and self.process.poll() is None:
             return
         if self.position >= self.duration - .05: self.position = 0.0
         self.generation += 1; generation = self.generation
         self.process = subprocess.Popen(["paplay", "--stream-name=UtterMux KOReader"], stdin=subprocess.PIPE)
         self.started_at = time.monotonic()
+        ACTIVE_AUDIO = self
+        if MEDIA: MEDIA.update("Playing")
         threading.Thread(target=self._feed, args=(generation, self._remaining_wav()), daemon=True).start()
 
     def _feed(self, generation, content):
@@ -74,13 +175,16 @@ class Audio:
         if generation == self.generation and self.started_at is not None:
             self.position = min(self.duration, self.position + time.monotonic() - self.started_at)
             self.started_at = None
+            if MEDIA: MEDIA.update("Stopped" if self.position >= self.duration - .05 else "Paused")
 
-    def stop(self):
+    def stop(self, reset=False):
         if self.process and self.process.poll() is None:
             if self.started_at is not None:
                 self.position = min(self.duration, self.position + time.monotonic() - self.started_at)
             self.generation += 1; self.process.terminate()
         self.process, self.started_at = None, None
+        if reset: self.position = 0.0
+        if MEDIA: MEDIA.update("Stopped" if reset else "Paused")
 
     def remaining(self):
         position = self.position + (time.monotonic() - self.started_at if self.started_at is not None else 0)
@@ -151,8 +255,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global MEDIA
     parser = argparse.ArgumentParser(); parser.add_argument("--host", default="127.0.0.1"); parser.add_argument("--port", type=int, default=5000)
-    args = parser.parse_args(); ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    args = parser.parse_args(); MEDIA = MediaSession()
+    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
 
 
 if __name__ == "__main__": main()

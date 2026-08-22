@@ -342,5 +342,16 @@ class ProtocolTests(unittest.TestCase):
         self.assertAlmostEqual(audio.position, 2.5)
         process.terminate.assert_called_once()
 
+    def test_koreader_playback_updates_media_session(self):
+        bridge = load_bridge(); audio = bridge.Audio(b"RIFF-invalid-for-mocked-feed", 10)
+        media = mock.MagicMock(); process = mock.MagicMock(); process.poll.return_value = None
+        with mock.patch.object(bridge, "MEDIA", media), \
+             mock.patch.object(bridge.subprocess, "Popen", return_value=process), \
+             mock.patch.object(bridge.threading, "Thread"), \
+             mock.patch.object(audio, "_remaining_wav", return_value=b"wav"):
+            audio.play(); audio.stop(); audio.stop(reset=True)
+        media.update.assert_has_calls([mock.call("Playing"), mock.call("Paused"), mock.call("Stopped")])
+        self.assertEqual(audio.position, 0.0)
+
 
 if __name__ == "__main__": unittest.main()

@@ -34,6 +34,9 @@ uses the same catalog schema and routing model.
 ## Capabilities
 
 - Native Speech Dispatcher output module and persistent synthesis broker.
+- MPRIS play/pause/stop controls for audio played by the compatibility service.
+  Firefox, Zotero, and other Speech Dispatcher clients retain ownership of
+  their own queues and transport state.
 - Searchable local/cloud voice catalog with previews, favorites, downloads,
   installed sizes, and model removal.
 - BCP-47 metadata, automatic language detection, per-language routes, and

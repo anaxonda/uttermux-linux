@@ -282,10 +282,17 @@ def setup(_args):
             if not target.exists(): shutil.copy2(source, target)
     speechd = config_dir().parent / "speech-dispatcher/speechd.conf"
     speechd.parent.mkdir(parents=True, exist_ok=True)
-    current = speechd.read_text(encoding="utf-8") if speechd.exists() else ""
+    original = speechd.read_text(encoding="utf-8") if speechd.exists() else ""
+    obsolete = {'SymbolsPreproc "char"', 'SymbolsPreprocFile "gender-neutral.dic"',
+                'SymbolsPreprocFile "font-variants.dic"', 'SymbolsPreprocFile "symbols.dic"',
+                'SymbolsPreprocFile "emojis.dic"', 'SymbolsPreprocFile "orca.dic"',
+                'SymbolsPreprocFile "orca-chars.dic"'}
+    current = "\n".join(line for line in original.splitlines()
+                        if line.strip() not in obsolete).strip() + "\n"
     begin, end = "# BEGIN uttermux", "# END uttermux"
     block = f'{begin}\nAddModule "uttermux" "sd_uttermux" "uttermux.conf"\nDefaultModule "uttermux"\n{end}'
-    if begin not in current: atomic_write(speechd, current.rstrip() + "\n\n" + block + "\n")
+    if begin not in current: current = current.rstrip() + "\n\n" + block + "\n"
+    if current != original: atomic_write(speechd, current)
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
     subprocess.run(["systemctl", "--user", "enable", "--now", "uttermux.socket"], check=True)
     subprocess.run(["systemctl", "--user", "enable", "--now", "uttermux-tray.service"], check=False)
@@ -1292,6 +1299,12 @@ def doctor(_args):
     try:
         next(iter(transact(HEALTH)), None); print("OK  broker protocol")
     except Exception as error: print(f"FAIL  broker protocol: {error}"); checks["broker"] = False
+    if shutil.which("pactl"):
+        output = subprocess.run(["pactl", "get-default-sink"], text=True,
+                                capture_output=True, check=False).stdout.strip()
+        virtual = any(word in output.casefold() for word in ("snapcast", "null", "virtual"))
+        print(f"{'WARN' if virtual else 'OK'}  audio sink: {output or 'unknown'}" +
+              (" (Speech Dispatcher audio may not be audible locally)" if virtual else ""))
     if not all(checks.values()): raise RuntimeError("one or more checks failed")
 
 

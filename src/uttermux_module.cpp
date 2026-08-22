@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <sys/socket.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -189,12 +190,20 @@ int module_speak(char *data, size_t bytes, SPDMessageType) {
 }
 int module_stop(void) {
   stopped.store(true); auto request = current_request.load();
-  if (request) send_locked(Message::Cancel, request);
+  if (request) {
+    std::lock_guard<std::mutex> lock(send_mutex);
+    if (broker_fd >= 0) {
+      send_packet(broker_fd, Message::Cancel, request);
+      // Never leave Speech Dispatcher blocked in receive_packet() when a
+      // provider or broker fails to answer cancellation. Speak reconnects.
+      ::shutdown(broker_fd, SHUT_RDWR);
+    }
+  }
   return 0;
 }
 size_t module_pause(void) {
-  paused.store(true); auto request = current_request.load();
-  if (request) send_locked(Message::Cancel, request);
+  paused.store(true);
+  module_stop();
   return 0;
 }
 int module_close(void) {

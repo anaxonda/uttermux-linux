@@ -265,13 +265,6 @@ def speechd_config(default_voice: str = "Kokoro Heart") -> str:
     module = config_home() / "speech-dispatcher/modules/sherpa.conf"
     return "\n".join([
         "# Managed by sherpa-voice",
-        'SymbolsPreproc "char"',
-        'SymbolsPreprocFile "gender-neutral.dic"',
-        'SymbolsPreprocFile "font-variants.dic"',
-        'SymbolsPreprocFile "symbols.dic"',
-        'SymbolsPreprocFile "emojis.dic"',
-        'SymbolsPreprocFile "orca.dic"',
-        'SymbolsPreprocFile "orca-chars.dic"',
         f'AddModule "sherpa" "sd_sherpa" "{module}"',
         'DefaultModule "sherpa"',
         'Include "clients/*.conf"', ""])
