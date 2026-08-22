@@ -180,6 +180,55 @@ schema and the model-specific benchmark documents under `docs/`.
 Enable **Settings → Preload active local voice** to avoid first-use model loading
 for a frequently used voice. This trades memory for startup latency.
 
+### Proposed Zotero lookahead adapter
+
+The current Zotero integration uses the Web Speech API. Zotero submits local
+voices one sentence at a time and requests the next sentence only after the
+current utterance ends. Local voices have no configured sentence delay, although
+Zotero deliberately adds 200 ms when playback crosses a paragraph boundary.
+Consequently, model and transport startup remains audible between ordinary
+sentences even when UtterMux streams PCM promptly.
+
+Zotero's separate remote-audio controller can hide that startup by fetching a
+three-segment window with up to two requests in flight while the current segment
+plays. A future optional integration can use that controller as follows:
+
+```text
+Zotero remote-audio controller
+    ↓ sentence lookahead and decoded-audio cache
+UtterMux Zotero plugin
+    ↓ authenticated loopback requests
+UtterMux audio bridge
+    ↓ existing catalog, routing, cache, and cancellation
+uttermuxd
+```
+
+Implementation requirements:
+
+- A companion Zotero plugin redirects the private
+  `getReadAloudVoices()` and `getReadAloudAudio()` client methods. This does not
+  modify the Zotero installation, but it is not a stable public extension API
+  and must be compatibility-tested against Zotero releases.
+- The loopback bridge returns voice ID, label, BCP-47 locale, sentence
+  granularity, zero sentence delay, and a cache-version value. Synthesis returns
+  a complete decodable audio blob, initially WAV, with optional word timestamps
+  and explicit cache-control behavior.
+- The bridge binds only to loopback, authenticates every request with a random
+  per-install token, validates request size and voice IDs, supports cancellation,
+  and bounds concurrent generation. Local engines may serialize inference while
+  still preparing later sentences during current playback.
+- The existing Speech Dispatcher/Web Speech route remains the system-wide
+  default. The adapter is a Zotero-specific option for models and services whose
+  per-utterance startup cannot be hidden through that interface.
+
+The relevant upstream implementations are Zotero Reader's
+[browser controller](https://github.com/zotero/reader/blob/master/src/common/read-aloud/browser/controller.ts),
+[remote controller](https://github.com/zotero/reader/blob/master/src/common/read-aloud/remote/controller.ts),
+and Zotero's
+[Read Aloud API client](https://github.com/zotero/zotero/blob/master/chrome/content/zotero/xpcom/sync/syncAPIClient.js).
+[zotero-local-tts](https://github.com/NightLightTw/zotero-local-tts) demonstrates
+the private-method plugin approach with a loopback Qwen service.
+
 ### Voice profiles
 
 Only clone voices when you have the necessary rights and consent.
@@ -241,7 +290,9 @@ UtterMux builds on [Speech Dispatcher](https://github.com/brailcom/speechd) and
 [Pied](https://github.com/Elleo/pied), [voicego](https://github.com/Ravino/voicego),
 [NekoSpeak](https://github.com/siva-sub/NekoSpeak),
 [HayaiTTS](https://github.com/HayaiApp/HayaiTTS), and
-[Read Aloud](https://github.com/ken107/read-aloud). Model-specific deployment
+[Read Aloud](https://github.com/ken107/read-aloud). The proposed Zotero adapter
+also draws on [zotero-local-tts](https://github.com/NightLightTw/zotero-local-tts).
+Model-specific deployment
 references are recorded in the generated index and benchmark documents.
 
 ## License
