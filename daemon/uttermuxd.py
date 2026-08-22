@@ -1265,7 +1265,8 @@ class Broker:
         return language, candidates
 
     def _synthesize_voice(self, voice_id: str, text: str, speed: float,
-                          language: str, emit, cancelled, thread_override: int = 0):
+                          language: str, emit, cancelled, thread_override: int = 0,
+                          use_cache: bool = True):
         if voice_id in self.voices:
             model, voice = self.voices[voice_id]
             self.synthesize_local(model, voice, text, speed, emit, cancelled,
@@ -1275,10 +1276,12 @@ class Broker:
             raise ValueError(f"unknown voice: {voice_id}")
         provider, _record = self.online_voices[voice_id]
         cache_key = (voice_id, language, text, round(speed, 3))
-        with self.audio_cache_lock:
-            cached = self.audio_cache.get(cache_key)
-            if cached:
-                self.audio_cache.move_to_end(cache_key)
+        cached = None
+        if use_cache:
+            with self.audio_cache_lock:
+                cached = self.audio_cache.get(cache_key)
+                if cached:
+                    self.audio_cache.move_to_end(cache_key)
         if cached:
             for raw in cached:
                 if cancelled.is_set(): break
@@ -1296,7 +1299,7 @@ class Broker:
 
         try:
             provider.synthesize(voice_id, text, speed, tracked, cancelled, language)
-            if captured and not cancelled.is_set() and self.audio_cache_limit:
+            if use_cache and captured and not cancelled.is_set() and self.audio_cache_limit:
                 size = sum(map(len, captured))
                 if size <= self.audio_cache_limit:
                     with self.audio_cache_lock:
@@ -1311,7 +1314,8 @@ class Broker:
             raise
 
     def synthesize(self, voice_id: str, text: str, speed: float, emit, cancelled,
-                   requested_language: str = "", thread_override: int = 0):
+                   requested_language: str = "", thread_override: int = 0,
+                   use_cache: bool = True):
         text = normalize_synthesis_text(text)
         if not text:
             return
@@ -1346,9 +1350,12 @@ class Broker:
                 try:
                     if thread_override:
                         self._synthesize_voice(candidate, text, speed, language, tracked, cancelled,
-                                               thread_override)
-                    else:
+                                               thread_override, use_cache)
+                    elif use_cache:
                         self._synthesize_voice(candidate, text, speed, language, tracked, cancelled)
+                    else:
+                        self._synthesize_voice(candidate, text, speed, language, tracked, cancelled,
+                                               use_cache=use_cache)
                     return
                 except Exception as error:
                     last_error = error
@@ -1402,22 +1409,24 @@ def client_loop(connection: socket.socket, broker: Broker) -> None:
                     jobs[request_id].set()
             elif kind == SYNTHESIZE:
                 values = split_fields(payload)
-                if len(values) not in (3, 4, 5):
+                if len(values) not in (3, 4, 5, 6):
                     send(packet(ERROR, request_id, b"invalid synthesis request"))
                     continue
                 voice_id, speed_text, text = values[:3]
                 language = values[3] if len(values) == 4 else ""
                 if len(values) >= 4: language = values[3]
-                thread_override = int(values[4]) if len(values) == 5 else 0
+                thread_override = int(values[4]) if len(values) >= 5 else 0
+                use_cache = not (len(values) == 6 and values[5] == "no-cache")
                 if thread_override < 0 or thread_override > 128:
                     send(packet(ERROR, request_id, b"invalid thread override")); continue
                 cancelled = jobs[request_id] = threading.Event()
 
                 def run(rid=request_id, voice=voice_id, content=text, speed=float(speed_text),
-                        event=cancelled, requested_language=language, threads=thread_override):
+                        event=cancelled, requested_language=language, threads=thread_override,
+                        cache=use_cache):
                     try:
                         broker.synthesize(voice, content, speed, lambda raw: send(raw, rid), event,
-                                          requested_language, threads)
+                                          requested_language, threads, cache)
                         send(packet(DONE, rid))
                     except Exception as error:
                         try:

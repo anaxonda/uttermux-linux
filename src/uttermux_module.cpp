@@ -234,7 +234,7 @@ int module_init(char **message) {
   return voices.empty() ? -1 : 0;
 }
 SPDVoice **module_list_voices(void) { return speechd_voices.empty() ? nullptr : speechd_voices.data(); }
-int module_speak(char *data, size_t bytes, SPDMessageType message_type) {
+int module_speak(char *data, size_t bytes, SPDMessageType) {
   if (!data || !bytes) return 0;
   try {
     join_worker(); stopped.store(false); paused.store(false);
@@ -247,9 +247,6 @@ int module_speak(char *data, size_t bytes, SPDMessageType message_type) {
       rate = current_rate; pitch = current_pitch; volume = current_volume;
     }
     std::string text = text_from_ssml(std::string_view(data, bytes));
-    const size_t embedded_nuls = static_cast<size_t>(std::count(data, data + bytes, '\0'));
-    std::fprintf(stderr, "sd_uttermux: speak type=%d bytes=%zu text=%zu nuls=%zu\n",
-                 static_cast<int>(message_type), bytes, text.size(), embedded_nuls);
     if (text.empty()) return 0;
     uint64_t request = next_request++;
     current_request.store(request);

@@ -979,7 +979,8 @@ def cmd_preview(args):
 
 def benchmark_once(voice_id: str, text: str, language: str = "", threads: int = 0) -> dict:
     """Measure broker synthesis without including audio-device playback."""
-    values = (voice_id, "1.0", text, language) + ((str(threads),) if threads else ())
+    # Benchmarks measure synthesis, never UtterMux's repeated-utterance cache.
+    values = (voice_id, "1.0", text, language, str(threads), "no-cache")
     payload = b"\0".join(value.encode("utf-8") for value in values) + b"\0"
     started_at = time.perf_counter()
     first_audio_at = None
@@ -1096,19 +1097,18 @@ def cmd_tune(args):
     candidates = args.threads or [value for value in (1, 2, 3, 4, 6, 8, 12, 16) if value <= cores]
     candidates = sorted(set(value for value in candidates if 1 <= value <= min(cores, 16)))
     if not candidates: raise RuntimeError("no valid thread candidates")
-    groups, best_seen = [], None
+    groups = []
     for threads in candidates:
         runs = []
         for index in range(3):
             run = benchmark_once(record["id"], args.text or benchmark_passage(language), language, threads)
             run["cold"] = index == 0; run["rssMb"] = broker_rss_mb(); runs.append(run)
-            if index == 1 and best_seen is not None and statistics.median(x["rtf"] for x in runs) > best_seen * 1.25:
-                break
-        median_rtf = statistics.median(run["rtf"] for run in runs)
+        warm_runs = [run for run in runs if not run["cold"]]
+        median_rtf = statistics.median(run["rtf"] for run in warm_runs)
         summary = {"threads": threads, "medianRtf": round(median_rtf, 3),
-                   "medianFirstAudioMs": round(statistics.median(run["firstAudioMs"] for run in runs), 1),
+                   "medianFirstAudioMs": round(statistics.median(run["firstAudioMs"] for run in warm_runs), 1),
                    "peakRssMb": max(run["rssMb"] for run in runs), "runs": runs}
-        groups.append(summary); best_seen = median_rtf if best_seen is None else min(best_seen, median_rtf)
+        groups.append(summary)
     fastest = min(group["medianRtf"] for group in groups)
     winner = min((group for group in groups if group["medianRtf"] <= fastest * 1.05),
                  key=lambda group: group["threads"])
