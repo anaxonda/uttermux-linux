@@ -1319,6 +1319,25 @@ def cmd_selection(args):
     subprocess.run(command + ["-w", text], check=True)
 
 
+def cmd_stop(_args):
+    """Stop UtterMux-owned playback and cancel Speech Dispatcher speech."""
+    # Selection reading and compatibility clients normally use the loopback
+    # player so they can expose truthful MPRIS state and resume after pause.
+    try:
+        request = urllib.request.Request(
+            "http://127.0.0.1:5000/stop", data=b"{}", method="POST",
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=1.0):
+            pass
+    except (OSError, TimeoutError):
+        pass
+    # Firefox, Zotero, and the selection fallback submit through Speech
+    # Dispatcher. Cancellation is best-effort because speechd may be disabled.
+    if shutil.which("spd-say"):
+        subprocess.run(["spd-say", "--cancel"], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def doctor(_args):
     checks = {"sd_uttermux": any(p.exists() for p in [Path("/usr/lib/speech-dispatcher/speech-dispatcher-modules/sd_uttermux"), Path("/usr/local/lib/speech-dispatcher/speech-dispatcher-modules/sd_uttermux")]),
               "uttermux socket": socket_path().exists(), "spd-say": bool(shutil.which("spd-say")),
@@ -1410,6 +1429,7 @@ def main():
     p.add_argument("model", nargs="?"); p.add_argument("values", nargs="?", default="{}"); p.set_defaults(func=cmd_model_setting)
     p = sub.add_parser("preview-url"); p.add_argument("url"); p.set_defaults(func=cmd_preview_url)
     p = sub.add_parser("speak-selection"); p.add_argument("--clipboard", action="store_true"); p.add_argument("--language"); p.set_defaults(func=cmd_selection)
+    sub.add_parser("stop").set_defaults(func=cmd_stop)
     p = sub.add_parser("provider"); p.add_argument("state", choices=("enable", "disable")); p.add_argument("provider", choices=ONLINE_PROVIDERS); p.set_defaults(func=cmd_provider)
     p = sub.add_parser("provider-default"); p.add_argument("provider", choices=ONLINE_PROVIDERS); p.add_argument("voice"); p.set_defaults(func=cmd_provider_default)
     p = sub.add_parser("favorite"); p.add_argument("action", choices=("list", "add", "remove")); p.add_argument("voice", nargs="?"); p.set_defaults(func=cmd_favorite)

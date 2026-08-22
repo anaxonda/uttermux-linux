@@ -36,6 +36,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(open_url.call_count, 2)
         self.assertEqual(run.call_count, 1)
 
+    def test_stop_cancels_owned_player_and_speech_dispatcher(self):
+        response = mock.MagicMock()
+        with mock.patch.object(ut.urllib.request, "urlopen", return_value=response) as open_url, \
+             mock.patch.object(ut.shutil, "which", return_value="/usr/bin/spd-say"), \
+             mock.patch.object(ut.subprocess, "run") as run:
+            ut.cmd_stop(None)
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url, "http://127.0.0.1:5000/stop")
+        self.assertEqual(request.get_method(), "POST")
+        run.assert_called_once_with(["spd-say", "--cancel"], check=False,
+                                    stdout=ut.subprocess.DEVNULL, stderr=ut.subprocess.DEVNULL)
+
     def test_directory_size_does_not_follow_links(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory); model = base / "model"; outside = base / "outside"

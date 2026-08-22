@@ -154,12 +154,14 @@ uttermux benchmark sherpa/vits-inflect-en-nano-v2/default --runs 3
 uttermux tune sherpa/vits-inflect-en-nano-v2/default
 uttermux default sherpa/vits-inflect-en-nano-v2/default
 uttermux speak-selection
+uttermux stop
 uttermux doctor
 ```
 
-Bind `uttermux speak-selection` to a desktop shortcut. It reads the Wayland or
-X11 primary selection through `wl-paste`, `xclip`, or `xsel`; add `--clipboard`
-to use the clipboard instead.
+Bind `uttermux speak-selection` and `uttermux stop` to desktop shortcuts. The
+former reads the Wayland or X11 primary selection through `wl-paste`, `xclip`,
+or `xsel`; add `--clipboard` to use the clipboard instead. `uttermux stop`
+cancels both UtterMux-owned playback and Speech Dispatcher speech.
 When the local playback service is enabled, selection audio is exposed through
 MPRIS for desktop play/pause/stop controls; otherwise it falls back to Speech
 Dispatcher.
