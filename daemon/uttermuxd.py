@@ -777,7 +777,7 @@ class QwenProvider:
         try:
             with urllib.request.urlopen(request, timeout=180) as response:
                 while not cancelled.is_set():
-                    chunk = response.read(32768)
+                    chunk = response.read1(32768)
                     if not chunk:
                         break
                     if not started:
@@ -907,7 +907,7 @@ class MossProvider:
         try:
             with urllib.request.urlopen(request, timeout=180) as response:
                 while not cancelled.is_set():
-                    chunk = response.read(32768)
+                    chunk = response.read1(32768)
                     if not chunk: break
                     if not started:
                         emit(packet(AUDIO_START, 0, struct.pack("<IB", 48000, 1))); started = True

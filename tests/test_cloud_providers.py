@@ -4,6 +4,7 @@ import sys
 import threading
 import unittest
 from unittest import mock
+import io
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "daemon"))
 import cloud_providers as cloud
@@ -21,22 +22,33 @@ class CloudProviderTests(unittest.TestCase):
     def test_openai_compatible_request_emits_raw_pcm_packets(self):
         provider = cloud.OpenAiProvider({"api_key": "secret", "endpoint": "https://example.test",
                                          "model": "speech-model"})
-        emitted = []
-        with mock.patch.object(cloud, "request", return_value=(b"\0\1" * 20, "audio/pcm")) as send:
-            provider.synthesize("openai/alloy", "Hello", 1.1, emitted.append, threading.Event(), "en-US")
+        with mock.patch.object(provider, "stream") as send:
+            provider.synthesize("openai/alloy", "Hello", 1.1, lambda _raw: None,
+                                threading.Event(), "en-US")
         body = json.loads(send.call_args.kwargs["data"] if isinstance(send.call_args.kwargs["data"], bytes)
                           else json.dumps(send.call_args.kwargs["data"]))
         self.assertEqual(body["model"], "speech-model")
         self.assertEqual(body["voice"], "alloy")
-        self.assertEqual(cloud.HEADER.unpack_from(emitted[0])[2], cloud.AUDIO_START)
-        self.assertEqual(cloud.HEADER.unpack_from(emitted[1])[2], cloud.AUDIO)
+
+    def test_stream_request_emits_before_the_http_response_is_complete(self):
+        class Response(io.BytesIO):
+            def close(self):
+                self.was_closed = True
+                super().close()
+        response = Response(b"\0\1" * 20)
+        emitted = []
+        with mock.patch.object(cloud.urllib.request, "urlopen", return_value=response):
+            cloud.stream_request("https://example.test/tts", emitted.append, threading.Event())
+        self.assertEqual([cloud.HEADER.unpack_from(item)[2] for item in emitted],
+                         [cloud.AUDIO_START, cloud.AUDIO])
+        self.assertTrue(response.was_closed)
 
     def test_custom_endpoint_is_constrained_to_json_and_pcm(self):
         provider = cloud.CustomProvider({"endpoint": "https://example.test/tts",
                                          "token": "secret", "voices": "reader"})
-        emitted = []
-        with mock.patch.object(cloud, "request", return_value=(b"\0\0", "audio/pcm")) as send:
-            provider.synthesize("custom/reader", "Text", 1.0, emitted.append, threading.Event(), "fr-FR")
+        with mock.patch.object(provider, "stream") as send:
+            provider.synthesize("custom/reader", "Text", 1.0, lambda _raw: None,
+                                threading.Event(), "fr-FR")
         self.assertEqual(send.call_args.args[0], "https://example.test/tts")
         self.assertEqual(send.call_args.kwargs["headers"]["Authorization"], "Bearer secret")
         self.assertEqual(send.call_args.kwargs["data"]["language"], "fr-FR")
@@ -50,14 +62,12 @@ class CloudProviderTests(unittest.TestCase):
     def test_polly_uses_supported_pcm_rate_and_announces_it(self):
         provider = cloud.AwsProvider({})
         provider.config.update({"access_key": "access", "secret_key": "secret"})
-        emitted = []
-        with mock.patch.object(cloud, "request", return_value=(b"\0\0", "audio/pcm")) as send:
-            provider.synthesize("aws/Joanna/neural@en-US", "Text", 1.0, emitted.append,
+        with mock.patch.object(provider, "stream") as send:
+            provider.synthesize("aws/Joanna/neural@en-US", "Text", 1.0, lambda _raw: None,
                                 threading.Event(), "en-US")
         body = json.loads(send.call_args.kwargs["data"])
         self.assertEqual(body["SampleRate"], "16000")
-        self.assertEqual(cloud.HEADER.unpack_from(emitted[0])[2], cloud.AUDIO_START)
-        self.assertEqual(cloud.struct.unpack("<IB", emitted[0][cloud.HEADER.size:])[0], 16000)
+        self.assertEqual(send.call_args.kwargs["sample_rate"], 16000)
         request_body = json.loads(send.call_args.kwargs["data"])
         self.assertNotIn("LanguageCode", request_body)
 
@@ -70,11 +80,12 @@ class CloudProviderTests(unittest.TestCase):
                 return json.dumps({"output": {"audio": {"url": "https://example.test/audio.wav"}}}).encode(), "application/json"
             return b"wav", "audio/wav"
         with mock.patch.object(cloud, "request", side_effect=reply), \
-             mock.patch.object(cloud, "decoded_pcm", return_value=b"\0\0"):
+             mock.patch.object(provider, "stream") as stream:
             provider.synthesize("qwen-api/Cherry@zh-CN", "Bonjour", 1.0,
                                 lambda _raw: None, threading.Event(), "fr-FR")
         self.assertEqual(calls[0][1]["data"]["input"]["language_type"], "French")
         self.assertNotIn("parameters", calls[0][1]["data"])
+        self.assertEqual(stream.call_args.args[0], "https://example.test/audio.wav")
 
     def test_azure_resource_endpoint_uses_required_tts_prefix(self):
         provider = cloud.AzureProvider({"endpoint": "https://demo.cognitiveservices.azure.com"})
@@ -87,15 +98,15 @@ class CloudProviderTests(unittest.TestCase):
     def test_deepgram_and_playht_apply_documented_speed_ranges(self):
         deepgram = cloud.DeepgramProvider({"api_key": "secret"}); play = cloud.PlayHtProvider({})
         play.config.update({"api_key": "secret", "user_id": "user"})
-        with mock.patch.object(cloud, "request", return_value=(b"wav", "audio/wav")) as send, \
-             mock.patch.object(cloud, "decoded_pcm", return_value=b"\0\0"):
+        with mock.patch.object(deepgram, "stream") as deep_send, \
+             mock.patch.object(play, "stream") as play_send:
             deepgram.synthesize("deepgram/aura-2-thalia-en", "Text", 3.0,
                                 lambda _raw: None, threading.Event(), "en-US")
-            self.assertIn("speed=1.5", send.call_args.args[0])
+            self.assertIn("speed=1.5", deep_send.call_args.args[0])
             play.synthesize("playht/default", "Texte", 9.0,
                             lambda _raw: None, threading.Event(), "fr-FR")
-            self.assertEqual(send.call_args.kwargs["data"]["speed"], 5)
-            self.assertEqual(send.call_args.kwargs["data"]["language"], "french")
+            self.assertEqual(play_send.call_args.kwargs["data"]["speed"], 5)
+            self.assertEqual(play_send.call_args.kwargs["data"]["language"], "french")
 
     def test_cartesia_uses_api_key_header_and_paginates(self):
         pages = [

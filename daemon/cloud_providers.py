@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 import subprocess
 import struct
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -40,6 +41,89 @@ def request(url, *, data=None, headers=None, method=None, timeout=60):
     except urllib.error.HTTPError as error:
         detail = error.read(4096).decode("utf-8", "replace")
         raise RuntimeError(f"cloud TTS HTTP {error.code}: {detail}") from None
+
+
+def stream_request(url, emit, cancelled, *, data=None, headers=None, method=None,
+                   timeout=60, sample_rate=24000, encoded=False, input_format=""):
+    """Forward an HTTP audio response as it arrives instead of buffering it.
+
+    Encoded streams are decoded concurrently: ffmpeg must drain its input while
+    its PCM output is drained, otherwise either pipe can fill and deadlock.
+    """
+    body = None if data is None else (data if isinstance(data, bytes) else json.dumps(data).encode())
+    values = {"Accept": "application/json", **(headers or {})}
+    if body is not None and not any(key.lower() == "content-type" for key in values):
+        values["Content-Type"] = "application/json"
+    request_object = urllib.request.Request(url, data=body, headers=values, method=method)
+    try:
+        response = urllib.request.urlopen(request_object, timeout=timeout)
+    except urllib.error.HTTPError as error:
+        detail = error.read(4096).decode("utf-8", "replace")
+        raise RuntimeError(f"cloud TTS HTTP {error.code}: {detail}") from None
+
+    started = False
+    def forward(chunk):
+        nonlocal started
+        if not chunk or cancelled.is_set():
+            return
+        if not started:
+            emit(packet(AUDIO_START, 0, struct.pack("<IB", sample_rate, 2)))
+            started = True
+        emit(packet(AUDIO, 0, chunk))
+
+    decoder = None
+    reader = None
+    decoder_error = []
+    try:
+        if encoded:
+            command = ["ffmpeg", "-nostdin", "-loglevel", "error"]
+            if input_format:
+                command += ["-f", input_format]
+            command += ["-i", "pipe:0", "-f", "s16le", "-acodec", "pcm_s16le",
+                        "-ar", str(sample_rate), "-ac", "1", "pipe:1"]
+            decoder = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE)
+            def drain_decoder():
+                try:
+                    while not cancelled.is_set():
+                        chunk = decoder.stdout.read1(32768)
+                        if not chunk:
+                            break
+                        forward(chunk)
+                except Exception as error:  # passed back to the request thread
+                    decoder_error.append(error)
+            reader = threading.Thread(target=drain_decoder, daemon=True)
+            reader.start()
+
+        while not cancelled.is_set():
+            chunk = response.read1(32768) if hasattr(response, "read1") else response.read(32768)
+            if not chunk:
+                break
+            if decoder:
+                try:
+                    decoder.stdin.write(chunk)
+                except BrokenPipeError:
+                    break
+            else:
+                forward(chunk)
+        if decoder:
+            decoder.stdin.close()
+            reader.join(timeout=10)
+            if reader.is_alive():
+                decoder.kill()
+                raise RuntimeError("cloud audio decoder did not finish")
+            status = decoder.wait(timeout=5)
+            if decoder_error:
+                raise decoder_error[0]
+            if status and not cancelled.is_set():
+                detail = decoder.stderr.read().decode("utf-8", "replace")[:1000]
+                raise RuntimeError("cloud audio decode failed: " + detail)
+    finally:
+        response.close()
+        if decoder and decoder.poll() is None:
+            decoder.kill()
+    if not started and not cancelled.is_set():
+        raise RuntimeError("cloud TTS returned no audio")
 
 
 def decoded_pcm(data: bytes, input_format: str = "") -> bytes:
@@ -127,6 +211,9 @@ class Provider:
                 return
             emit(packet(AUDIO, 0, pcm[offset:offset + 32768]))
 
+    def stream(self, url, emit, cancelled, **kwargs):
+        return stream_request(url, emit, cancelled, **kwargs)
+
 
 class OpenAiProvider(Provider):
     id, model = "openai", "gpt-4o-mini-tts"
@@ -144,10 +231,9 @@ class OpenAiProvider(Provider):
         endpoint = require_https(self.value("endpoint", "https://api.openai.com"), "OpenAI endpoint")
         body = {"model": self.value("model", self.model), "voice": self.external(voice_id),
                 "input": text, "response_format": "pcm", "speed": max(.25, min(4, speed))}
-        data, _ = request(endpoint + "/v1/audio/speech", data=body,
-                          headers={"Authorization": "Bearer " + self.require("api_key"),
-                                   "Accept": "audio/pcm"})
-        self.emit(data, emit, cancelled)
+        self.stream(endpoint + "/v1/audio/speech", emit, cancelled, data=body,
+                    headers={"Authorization": "Bearer " + self.require("api_key"),
+                             "Accept": "audio/pcm"})
 
 
 class AzureProvider(Provider):
@@ -180,12 +266,11 @@ class AzureProvider(Provider):
         ssml = (f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
                 f"xml:lang='{html.escape(language or 'en-US')}'><voice name='{html.escape(name)}'>"
                 f"<prosody rate='{rate:+d}%'>{html.escape(text)}</prosody></voice></speak>").encode()
-        data, _ = request(self.endpoint("v1"), data=ssml, method="POST",
-                          headers={"Ocp-Apim-Subscription-Key": self.require("api_key"),
-                                   "Content-Type": "application/ssml+xml",
-                                   "X-Microsoft-OutputFormat": "raw-24khz-16bit-mono-pcm",
-                                   "User-Agent": "UtterMux", "Accept": "audio/pcm"})
-        self.emit(data, emit, cancelled)
+        self.stream(self.endpoint("v1"), emit, cancelled, data=ssml, method="POST",
+                    headers={"Ocp-Apim-Subscription-Key": self.require("api_key"),
+                             "Content-Type": "application/ssml+xml",
+                             "X-Microsoft-OutputFormat": "raw-24khz-16bit-mono-pcm",
+                             "User-Agent": "UtterMux", "Accept": "audio/pcm"})
 
 
 class GoogleProvider(Provider):
@@ -333,8 +418,8 @@ class AwsProvider(Provider):
             values["LanguageCode"] = "hi-IN"
         body = json.dumps(values, separators=(",", ":")).encode()
         url = f"https://polly.{self.region()}.amazonaws.com/v1/speech"
-        data, _ = request(url, data=body, method="POST", headers=self.signed("POST", url, body))
-        self.emit(data, emit, cancelled, sample_rate=16000)
+        self.stream(url, emit, cancelled, data=body, method="POST",
+                    headers=self.signed("POST", url, body), sample_rate=16000)
 
 
 class DeepgramProvider(Provider):
@@ -346,9 +431,9 @@ class DeepgramProvider(Provider):
         query = urllib.parse.urlencode({"model": self.external(voice_id), "encoding": "linear16",
                                         "sample_rate": 24000, "container": "wav",
                                         "speed": max(.7, min(1.5, speed))})
-        data, _ = request("https://api.deepgram.com/v1/speak?" + query, data={"text": text},
-                          headers={"Authorization": "Token " + self.require("api_key")})
-        self.emit(data, emit, cancelled, encoded=True)
+        self.stream("https://api.deepgram.com/v1/speak?" + query, emit, cancelled,
+                    data={"text": text}, headers={"Authorization": "Token " + self.require("api_key")},
+                    encoded=True)
 
 
 class CartesiaProvider(Provider):
@@ -388,8 +473,8 @@ class CartesiaProvider(Provider):
                 "language": (language or "en").split("-", 1)[0],
                 "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": 24000},
                 "generation_config": {"speed": max(.6, min(1.5, speed))}}
-        data, _ = request("https://api.cartesia.ai/tts/bytes", data=body, headers=self.headers())
-        self.emit(data, emit, cancelled)
+        self.stream("https://api.cartesia.ai/tts/bytes", emit, cancelled,
+                    data=body, headers=self.headers())
 
 
 class PlayHtProvider(Provider):
@@ -418,9 +503,8 @@ class PlayHtProvider(Provider):
                 "voice_engine": self.value("model", self.model), "output_format": "wav",
                 "sample_rate": 24000, "speed": max(.1, min(5, speed)),
                 "language": language_name(language).lower()}
-        data, _ = request("https://api.play.ht/api/v2/tts/stream", data=body,
-                          headers={**self.headers(), "Accept": "audio/wav"})
-        self.emit(data, emit, cancelled, encoded=True)
+        self.stream("https://api.play.ht/api/v2/tts/stream", emit, cancelled, data=body,
+                    headers={**self.headers(), "Accept": "audio/wav"}, encoded=True)
 
 
 class ResembleProvider(Provider):
@@ -439,9 +523,8 @@ class ResembleProvider(Provider):
             body["project_uuid"] = self.value("project")
         endpoint = require_https(self.value("endpoint", "https://f.cluster.resemble.ai/stream"),
                                  "Resemble endpoint")
-        data, _ = request(endpoint, data=body,
-                          headers={"Authorization": "Bearer " + self.require("api_key")})
-        self.emit(data, emit, cancelled, encoded=True)
+        self.stream(endpoint, emit, cancelled, data=body,
+                    headers={"Authorization": "Bearer " + self.require("api_key")}, encoded=True)
 
 
 class CustomProvider(Provider):
@@ -458,9 +541,8 @@ class CustomProvider(Provider):
         headers = {"Accept": "audio/pcm"}
         if self.value("token"):
             headers["Authorization"] = "Bearer " + self.value("token")
-        data, _ = request(endpoint, data={"text": text, "voice": self.external(voice_id),
-                          "language": language, "speed": speed}, headers=headers)
-        self.emit(data, emit, cancelled)
+        self.stream(endpoint, emit, cancelled, data={"text": text, "voice": self.external(voice_id),
+                    "language": language, "speed": speed}, headers=headers)
 
 
 class QwenApiProvider(Provider):
@@ -487,8 +569,7 @@ class QwenApiProvider(Provider):
         url = audio.get("url", "") if isinstance(audio, dict) else (audio if isinstance(audio, str) else "")
         if not url:
             raise RuntimeError("Qwen returned no audio URL: " + data.decode("utf-8", "replace")[:1000])
-        encoded, _ = request(url, headers={"Accept": "audio/*"})
-        self.emit(encoded, emit, cancelled, encoded=True)
+        self.stream(url, emit, cancelled, headers={"Accept": "audio/*"}, encoded=True)
 
 
 PROVIDERS = {

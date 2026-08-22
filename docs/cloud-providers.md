@@ -1,6 +1,6 @@
 # Cloud provider contracts
 
-Cloud adapters share UtterMux language routing, cancellation, and voice selection. They do not pretend that every service has identical controls: each row below records the request contract actually sent to the provider. Credentials are stored in a mode-0600 JSON file on Linux and with Android Keystore-backed AES-GCM encryption on Android.
+Cloud adapters share UtterMux language routing, cancellation, voice selection, and incremental playback. Linux forwards raw PCM as each HTTP chunk arrives and concurrently decodes chunked WAV or compressed audio; it does not wait for the complete utterance. APIs that return JSON containing base64 audio or a later download URL still impose an initial non-streaming request. Each row below records the request contract actually sent to the provider. Credentials are stored in a mode-0600 JSON file on Linux and with Android Keystore-backed AES-GCM encryption on Android.
 
 | Provider | Credentials and discovery | Synthesis and audio | Native rate |
 | --- | --- | --- | --- |
