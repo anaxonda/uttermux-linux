@@ -160,7 +160,7 @@ class ProtocolTests(unittest.TestCase):
         with mock.patch("pathlib.Path.read_text", return_value="secret\n"), \
              mock.patch.object(self.u.urllib.request, "urlopen",
                                side_effect=[voice_response, audio_response]) as open_url:
-            provider = self.u.GrokProvider({"automatic_language": True})
+            provider = self.u.GrokProvider({"automatic_language": True, "transport": "rest"})
             emitted = []
             provider.synthesize("grok/eve", "Bonjour", 1.0, emitted.append,
                                 threading.Event(), "fr-FR")

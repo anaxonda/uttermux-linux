@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from array import array
+import base64
 from collections import OrderedDict
 import ctypes
 import json
@@ -26,8 +27,11 @@ import time
 import tomllib
 from typing import Callable
 import urllib.error
+import urllib.parse
 import urllib.request
 import wave
+
+import aiohttp
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -614,6 +618,16 @@ class GrokProvider:
         if not self.api_key:
             raise RuntimeError("Grok credential is empty")
         self.automatic_language = bool(config.get("automatic_language", True))
+        self.transport = str(config.get("transport", "websocket")).lower()
+        self.streaming_latency = max(0, min(2, int(config.get("streaming_latency", 1))))
+        self._ws = None
+        self._ws_key = None
+        self._session = None
+        self._ws_lock = threading.Lock()
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(target=self._loop.run_forever,
+                                             name="grok-websocket", daemon=True)
+        self._loop_thread.start()
         request = urllib.request.Request("https://api.x.ai/v1/tts/voices", headers={
             "Authorization": f"Bearer {self.api_key}", "Accept": "application/json"})
         try:
@@ -645,11 +659,33 @@ class GrokProvider:
         external_id = voice_id.removeprefix("grok/")
         if external_id not in self._voices:
             raise ValueError(f"unknown Grok voice: {voice_id}")
+        selected_language = "auto" if self.automatic_language else (language or "en")
+        selected_speed = max(.7, min(1.5, speed))
+        if self.transport != "rest":
+            started = False
+            def tracked(raw):
+                nonlocal started
+                started = started or HEADER.unpack_from(raw)[2] in (AUDIO_START, AUDIO)
+                emit(raw)
+            try:
+                with self._ws_lock:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._synthesize_websocket(external_id, text, selected_speed,
+                                                   selected_language, tracked, cancelled), self._loop)
+                    future.result(timeout=120)
+                return
+            except Exception:
+                if started or cancelled.is_set():
+                    raise
+                # Retain compatibility during transient WebSocket outages. A
+                # REST retry is safe only before any audio reached the caller.
+
         request_body = {
             "text": text, "voice_id": external_id,
-            "language": "auto" if self.automatic_language else (language or "en"),
+            "language": selected_language,
             "output_format": {"codec": "pcm", "sample_rate": 24000},
-            "speed": max(.7, min(1.5, speed)), "text_normalization": True,
+            "speed": selected_speed, "text_normalization": True,
+            "optimize_streaming_latency": self.streaming_latency,
         }
         request = urllib.request.Request(
             "https://api.x.ai/v1/tts", data=json.dumps(request_body).encode(), method="POST",
@@ -670,6 +706,65 @@ class GrokProvider:
         except urllib.error.HTTPError as error:
             detail = error.read(2048).decode("utf-8", "replace")
             raise RuntimeError(f"Grok HTTP {error.code}: {detail}") from None
+
+    async def _synthesize_websocket(self, voice, text, speed, language, emit, cancelled):
+        key = (voice, language, round(speed, 3), self.streaming_latency)
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        if self._ws is None or self._ws.closed or self._ws_key != key:
+            if self._ws is not None and not self._ws.closed:
+                await self._ws.close()
+            query = urllib.parse.urlencode({
+                "language": language, "voice": voice, "codec": "pcm", "sample_rate": 24000,
+                "speed": speed, "optimize_streaming_latency": self.streaming_latency,
+                "text_normalization": "true",
+            })
+            self._ws = await self._session.ws_connect(
+                "wss://api.x.ai/v1/tts?" + query,
+                headers={"Authorization": f"Bearer {self.api_key}"}, heartbeat=30)
+            self._ws_key = key
+        ws = self._ws
+        await ws.send_json({"type": "text.delta", "delta": text})
+        await ws.send_json({"type": "text.done"})
+        started = False
+        clearing = False
+        try:
+            while True:
+                if cancelled.is_set() and not clearing:
+                    await ws.send_json({"type": "text.clear"})
+                    clearing = True
+                try:
+                    message = await asyncio.wait_for(ws.receive(), timeout=.1)
+                except TimeoutError:
+                    continue
+                if message.type == aiohttp.WSMsgType.TEXT:
+                    event = json.loads(message.data)
+                    kind = event.get("type")
+                    if kind == "audio.delta" and not clearing:
+                        chunk = base64.b64decode(event.get("delta", ""), validate=True)
+                        if chunk:
+                            if not started:
+                                emit(packet(AUDIO_START, 0, struct.pack("<IB", 24000, 2)))
+                                started = True
+                            max_payload = MAX_PACKET - HEADER.size
+                            for offset in range(0, len(chunk), max_payload):
+                                emit(packet(AUDIO, 0, chunk[offset:offset + max_payload]))
+                    elif kind == "audio.done":
+                        if not started and not clearing:
+                            raise RuntimeError("Grok returned no WebSocket audio")
+                        return
+                    elif kind == "audio.clear":
+                        return
+                    elif kind == "error":
+                        raise RuntimeError("Grok WebSocket: " + str(event.get("message", "unknown error")))
+                elif message.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE,
+                                      aiohttp.WSMsgType.ERROR):
+                    raise RuntimeError("Grok WebSocket closed before audio completed")
+        except Exception:
+            await ws.close()
+            self._ws = None
+            self._ws_key = None
+            raise
 
 
 class QwenProvider:
