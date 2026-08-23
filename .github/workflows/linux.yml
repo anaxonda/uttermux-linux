@@ -13,7 +13,7 @@ jobs:
       - name: Install dependencies
         run: >-
           pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf python
-          speech-dispatcher rubberband onnxruntime-cpu ffmpeg python-gobject gtk4
+          speech-dispatcher rubberband onnxruntime-cpu ffmpeg python-gobject gtk4 python-aiohttp
           xorg-server-xvfb xorg-xwininfo imagemagick
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -53,7 +53,7 @@ jobs:
       - name: Install dependencies
         run: >-
           apt-get install -y --no-install-recommends git ca-certificates cmake ninja-build
-          g++ pkg-config python3 libspeechd-dev libspeechd-module0
+          g++ pkg-config python3 python3-aiohttp libspeechd-dev libspeechd-module0
           librubberband-dev ffmpeg
       - uses: actions/checkout@v7
       - run: >-
