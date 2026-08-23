@@ -30,6 +30,8 @@ streaming. The GTK manager is optional during synthesis.
 
 The companion [Android system TTS engine](https://github.com/anaxonda/uttermux-android)
 uses the same catalog schema and routing model.
+The [Zotero companion add-on](https://github.com/anaxonda/uttermux-zotero)
+adds sentence lookahead for continuous document reading.
 
 ## Capabilities
 
@@ -46,6 +48,7 @@ uses the same catalog schema and routing model.
 - Pocket and ZipVoice local profiles; ElevenLabs voice cloning.
 - GTK manager, tray launcher, CLI, and selected-text shortcut for Wayland/X11.
 - Optional localhost PCM adapter for legacy reader integrations.
+- Optional authenticated Zotero bridge for sentence-ahead synthesis.
 
 ## Local engines
 
@@ -182,54 +185,37 @@ schema and the model-specific benchmark documents under `docs/`.
 Enable **Settings → Preload active local voice** to avoid first-use model loading
 for a frequently used voice. This trades memory for startup latency.
 
-### Proposed Zotero lookahead adapter
+### Zotero lookahead add-on
 
-The current Zotero integration uses the Web Speech API. Zotero submits local
-voices one sentence at a time and requests the next sentence only after the
-current utterance ends. Local voices have no configured sentence delay, although
-Zotero deliberately adds 200 ms when playback crosses a paragraph boundary.
-Consequently, model and transport startup remains audible between ordinary
-sentences even when UtterMux streams PCM promptly.
-
-Zotero's separate remote-audio controller can hide that startup by fetching a
-three-segment window with up to two requests in flight while the current segment
-plays. A future optional integration can use that controller as follows:
+The system Speech Dispatcher route remains available without an add-on. For
+models whose sentence synthesis time is audible, install
+[UtterMux for Zotero](https://github.com/anaxonda/uttermux-zotero). It uses
+Zotero's remote-audio controller to fetch a three-segment window with up to two
+requests in flight:
 
 ```text
 Zotero remote-audio controller
     ↓ sentence lookahead and decoded-audio cache
-UtterMux Zotero plugin
+UtterMux for Zotero
     ↓ authenticated loopback requests
 UtterMux audio bridge
     ↓ existing catalog, routing, cache, and cancellation
 uttermuxd
 ```
 
-Implementation requirements:
+Enable the bridge after installing UtterMux, then install the XPI from the
+companion repository:
 
-- A companion Zotero plugin redirects the private
-  `getReadAloudVoices()` and `getReadAloudAudio()` client methods. This does not
-  modify the Zotero installation, but it is not a stable public extension API
-  and must be compatibility-tested against Zotero releases.
-- The loopback bridge returns voice ID, label, BCP-47 locale, sentence
-  granularity, zero sentence delay, and a cache-version value. Synthesis returns
-  a complete decodable audio blob, initially WAV, with optional word timestamps
-  and explicit cache-control behavior.
-- The bridge binds only to loopback, authenticates every request with a random
-  per-install token, validates request size and voice IDs, supports cancellation,
-  and bounds concurrent generation. Local engines may serialize inference while
-  still preparing later sentences during current playback.
-- The existing Speech Dispatcher/Web Speech route remains the system-wide
-  default. The adapter is a Zotero-specific option for models and services whose
-  per-utterance startup cannot be hidden through that interface.
+```sh
+uttermux zotero enable
+uttermux zotero status
+```
 
-The relevant upstream implementations are Zotero Reader's
-[browser controller](https://github.com/zotero/reader/blob/master/src/common/read-aloud/browser/controller.ts),
-[remote controller](https://github.com/zotero/reader/blob/master/src/common/read-aloud/remote/controller.ts),
-and Zotero's
-[Read Aloud API client](https://github.com/zotero/zotero/blob/master/chrome/content/zotero/xpcom/sync/syncAPIClient.js).
-[zotero-local-tts](https://github.com/NightLightTw/zotero-local-tts) demonstrates
-the private-method plugin approach with a loopback Qwen service.
+The bridge binds to `127.0.0.1`, authenticates requests with a mode-0600 runtime
+token, cancels disconnected synthesis, and never logs text or credentials.
+Local audio may use Zotero's private Read Aloud cache; online audio is marked
+`no-store`. The add-on patches a private Zotero 9 API and is released separately
+so compatibility can follow Zotero's release cycle.
 
 ### Voice profiles
 
@@ -292,8 +278,8 @@ UtterMux builds on [Speech Dispatcher](https://github.com/brailcom/speechd) and
 [Pied](https://github.com/Elleo/pied), [voicego](https://github.com/Ravino/voicego),
 [NekoSpeak](https://github.com/siva-sub/NekoSpeak),
 [HayaiTTS](https://github.com/HayaiApp/HayaiTTS), and
-[Read Aloud](https://github.com/ken107/read-aloud). The proposed Zotero adapter
-also draws on [zotero-local-tts](https://github.com/NightLightTw/zotero-local-tts).
+[Read Aloud](https://github.com/ken107/read-aloud). The Zotero companion also
+draws on [zotero-local-tts](https://github.com/NightLightTw/zotero-local-tts).
 Model-specific deployment
 references are recorded in the generated index and benchmark documents.
 

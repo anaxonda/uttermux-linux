@@ -152,6 +152,18 @@ class ProtocolTests(unittest.TestCase):
         broker.synthesize("edge/libby", "Hello", 1.2, lambda _raw: None, threading.Event(), "en-US")
         self.assertEqual(speeds, [1.5])
 
+    def test_system_voice_list_can_be_limited_to_favorites_and_default(self):
+        broker = self.broker()
+        broker.config.update({
+            "system_voices_favorites_only": True,
+            "favorite_voices": ["elevenlabs/bill"],
+            "default_voice": "edge/libby",
+        })
+        system_ids = [record[0] for record in broker.list_voices()]
+        management_ids = [record[0] for record in broker.list_voices(management=True)]
+        self.assertEqual(set(system_ids), {"edge/libby", "elevenlabs/bill"})
+        self.assertEqual(set(management_ids), set(broker.voice_meta))
+
     def test_online_pcm_tail_filter_removes_silence_and_keeps_boundary(self):
         emitted = []
         filter_ = self.u.TrailingPcmFilter(emitted.append, threading.Event(),

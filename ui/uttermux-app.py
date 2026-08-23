@@ -461,6 +461,11 @@ class SettingsPage(Gtk.Box):
         box.append(Gtk.Label(label="These are global defaults for Firefox, Zotero, selection reading, and KOReader. Per-artifact values on Test & tune take precedence.", xalign=0, wrap=True))
         self.auto_language = Gtk.Switch(); self.auto_language.connect("state-set", self.set_boolean, "auto-detect-language")
         box.append(self.setting_row("Detect language automatically", "Routes longer text to a compatible configured voice.", self.auto_language))
+        self.favorite_system_voices = Gtk.Switch(); self.favorite_system_voices.connect(
+            "state-set", self.set_boolean, "system-voices-favorites-only")
+        box.append(self.setting_row("Only favorites in system voice lists",
+            "Show favorites plus the active voice in Firefox, Zotero, and other Speech Dispatcher clients. The full catalog remains available here.",
+            self.favorite_system_voices))
         self.preload_voice = Gtk.Switch(); self.preload_voice.connect("state-set", self.set_boolean, "preload-default-voice")
         box.append(self.setting_row("Preload active local voice", "Uses more memory after login, but removes the first-use model loading delay.", self.preload_voice))
         self.playback_speed = Gtk.SpinButton.new_with_range(.5, 2, .05); self.playback_speed.set_digits(2)
@@ -541,6 +546,7 @@ class SettingsPage(Gtk.Box):
         for provider, widget in self.provider_switches.items(): widget.set_active(bool(enabled.get(provider)))
         playback = schema.get("playback", {})
         self.auto_language.set_active(bool(playback.get("autoDetectLanguage", {}).get("value", True)))
+        self.favorite_system_voices.set_active(bool(playback.get("systemVoicesFavoritesOnly", {}).get("value", False)))
         self.preload_voice.set_active(bool(playback.get("preloadDefaultVoice", {}).get("value", False)))
         self.playback_speed.set_value(playback.get("playbackSpeed", {}).get("value", 1.0))
         self.local_threads.set_value(playback.get("localThreads", {}).get("value", 0))

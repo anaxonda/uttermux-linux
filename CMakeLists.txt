@@ -38,7 +38,8 @@ set(SPEECHD_MODULE_DIR "${CMAKE_INSTALL_LIBDIR}/speech-dispatcher/speech-dispatc
 install(TARGETS sd_uttermux RUNTIME DESTINATION ${SPEECHD_MODULE_DIR})
 install(PROGRAMS daemon/uttermuxd.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME uttermuxd)
 install(PROGRAMS bridge/koreader_bridge.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME koreader-bridge)
-foreach(unit uttermux.service uttermux-koreader.service uttermux-tray.service)
+install(PROGRAMS bridge/zotero_bridge.py DESTINATION ${CMAKE_INSTALL_LIBDIR}/uttermux RENAME zotero-bridge)
+foreach(unit uttermux.service uttermux-koreader.service uttermux-zotero.service uttermux-tray.service)
   configure_file(systemd/${unit} ${CMAKE_CURRENT_BINARY_DIR}/systemd/${unit} @ONLY)
 endforeach()
 set(SYSTEMD_USER_UNIT_DIR "${CMAKE_INSTALL_PREFIX}/lib/systemd/user"
@@ -46,6 +47,7 @@ set(SYSTEMD_USER_UNIT_DIR "${CMAKE_INSTALL_PREFIX}/lib/systemd/user"
 install(FILES systemd/uttermux.socket
         ${CMAKE_CURRENT_BINARY_DIR}/systemd/uttermux.service
         ${CMAKE_CURRENT_BINARY_DIR}/systemd/uttermux-koreader.service
+        ${CMAKE_CURRENT_BINARY_DIR}/systemd/uttermux-zotero.service
         ${CMAKE_CURRENT_BINARY_DIR}/systemd/uttermux-tray.service
         DESTINATION ${SYSTEMD_USER_UNIT_DIR})
 install(PROGRAMS cli/uttermux DESTINATION ${CMAKE_INSTALL_BINDIR})

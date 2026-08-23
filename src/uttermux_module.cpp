@@ -221,6 +221,21 @@ void speak_worker(std::string text, std::string voice_id, std::string language,
 void join_worker() {
   if (worker.joinable() && worker.get_id() != std::this_thread::get_id()) worker.join();
 }
+
+void cancel_worker() {
+  stopped.store(true);
+  auto request = current_request.load();
+  auto player = player_pid.load();
+  if (player > 0) ::kill(player, SIGTERM);
+  if (request) {
+    std::lock_guard<std::mutex> lock(send_mutex);
+    if (broker_fd >= 0) {
+      send_packet(broker_fd, Message::Cancel, request);
+      // Wake a worker blocked in receive_packet(). The next request reconnects.
+      ::shutdown(broker_fd, SHUT_RDWR);
+    }
+  }
+}
 }  // namespace
 
 extern "C" {
@@ -237,6 +252,9 @@ SPDVoice **module_list_voices(void) { return speechd_voices.empty() ? nullptr : 
 int module_speak(char *data, size_t bytes, SPDMessageType) {
   if (!data || !bytes) return 0;
   try {
+    // A replacement utterance must not wait for stale neural/network work.
+    // Some Web Speech clients do not deliver a separate STOP before SPEAK.
+    if (worker.joinable()) cancel_worker();
     join_worker(); stopped.store(false); paused.store(false);
     std::string selected_id, language; int rate, pitch, volume;
     {
@@ -256,18 +274,7 @@ int module_speak(char *data, size_t bytes, SPDMessageType) {
   } catch (...) { current_request.store(0); return 0; }
 }
 int module_stop(void) {
-  stopped.store(true); auto request = current_request.load();
-  auto player = player_pid.load();
-  if (player > 0) ::kill(player, SIGTERM);
-  if (request) {
-    std::lock_guard<std::mutex> lock(send_mutex);
-    if (broker_fd >= 0) {
-      send_packet(broker_fd, Message::Cancel, request);
-      // Never leave Speech Dispatcher blocked in receive_packet() when a
-      // provider or broker fails to answer cancellation. Speak reconnects.
-      ::shutdown(broker_fd, SHUT_RDWR);
-    }
-  }
+  cancel_worker();
   return 0;
 }
 size_t module_pause(void) {

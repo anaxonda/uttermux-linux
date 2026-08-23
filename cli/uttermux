@@ -186,7 +186,8 @@ def render_config(doc: dict) -> str:
              f'moss_threads = {int(doc.get("moss_threads", 0))}',
              f'moss_batch_frames = {int(doc.get("moss_batch_frames", 4))}',
              f'external_idle_seconds = {int(doc.get("external_idle_seconds", 120))}',
-             f'preload_default_voice = {str(bool(doc.get("preload_default_voice", False))).lower()}']
+             f'preload_default_voice = {str(bool(doc.get("preload_default_voice", False))).lower()}',
+             f'system_voices_favorites_only = {str(bool(doc.get("system_voices_favorites_only", False))).lower()}']
     favorites = [str(value) for value in doc.get("favorite_voices", []) if str(value)]
     if favorites: lines.append("favorite_voices = [" + ", ".join(quote(value) for value in favorites) + "]")
     for key in ("default_voice", "fallback_voice"):
@@ -619,6 +620,8 @@ def cmd_settings_schema(_args):
                                 "value": int(document.get("external_idle_seconds", 120))},
         "preloadDefaultVoice": {"type": "boolean", "default": False,
                                 "value": bool(document.get("preload_default_voice", False))},
+        "systemVoicesFavoritesOnly": {"type": "boolean", "default": False,
+                                       "value": bool(document.get("system_voices_favorites_only", False))},
         "autoDetectLanguage": {"type": "boolean", "default": True,
                                "value": bool(routing.get("auto_detect", True))},
         "languageMinimumCharacters": {"type": "integer", "minimum": 10, "maximum": 500, "default": 40,
@@ -661,6 +664,26 @@ def cmd_default(args):
 def cmd_reload(_args):
     restart()
     print("UtterMux services reloaded")
+
+
+def cmd_zotero(args):
+    if not shutil.which("systemctl"):
+        raise RuntimeError("Zotero bridge management requires systemd user services")
+    unit = "uttermux-zotero.service"
+    if args.action == "enable":
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "enable", "--now", unit], check=True)
+        print("UtterMux Zotero bridge enabled")
+    elif args.action == "disable":
+        subprocess.run(["systemctl", "--user", "disable", "--now", unit], check=True)
+        print("UtterMux Zotero bridge disabled")
+    else:
+        result = subprocess.run(["systemctl", "--user", "is-active", unit],
+                                text=True, capture_output=True)
+        state = result.stdout.strip() or "inactive"
+        print(state)
+        if result.returncode:
+            raise RuntimeError(f"Zotero bridge is {state}")
 
 
 def cmd_routes(_args):
@@ -890,6 +913,11 @@ def cmd_setting(args):
         if value not in {"true", "false", "1", "0", "yes", "no"}:
             raise RuntimeError("preload-default-voice expects true or false")
         doc["preload_default_voice"] = value in {"true", "1", "yes"}
+    elif args.name == "system-voices-favorites-only":
+        value = args.value.casefold()
+        if value not in {"true", "false", "1", "0", "yes", "no"}:
+            raise RuntimeError("system-voices-favorites-only expects true or false")
+        doc["system_voices_favorites_only"] = value in {"true", "1", "yes"}
     atomic_write(config_path(), render_config(doc))
     if not args.defer_restart: restart()
 
@@ -1439,9 +1467,11 @@ def main():
         "zipvoice-num-steps", "moss-threads", "moss-batch-frames",
         "external-idle-seconds",
         "auto-detect-language", "language-minimum-characters",
-        "language-minimum-confidence", "cross-language-fallback", "preload-default-voice"));
+        "language-minimum-confidence", "cross-language-fallback", "preload-default-voice",
+        "system-voices-favorites-only"));
     p.add_argument("value"); p.add_argument("--defer-restart", action="store_true"); p.set_defaults(func=cmd_setting)
     sub.add_parser("reload").set_defaults(func=cmd_reload)
+    p = sub.add_parser("zotero"); p.add_argument("action", choices=("enable", "disable", "status")); p.set_defaults(func=cmd_zotero)
     p = sub.add_parser("edge-locales"); p.add_argument("locales", nargs="+"); p.set_defaults(func=cmd_edge_locales)
     p = sub.add_parser("elevenlabs-key"); p.add_argument("key"); p.set_defaults(func=cmd_key)
     p = sub.add_parser("credential-set"); p.add_argument("provider", choices=("elevenlabs", "grok")); p.set_defaults(func=cmd_credential_set)

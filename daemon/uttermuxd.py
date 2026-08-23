@@ -1157,6 +1157,7 @@ class MossProvider:
 class Broker:
     def __init__(self):
         self.config = load_config()
+        self.exposure_hot_reload = True
         self.api = ctypes.CDLL("libsherpa-onnx-c-api.so")
         self.api.SherpaOnnxCreateOfflineTts.argtypes = [ctypes.POINTER(TtsConfig)]
         self.api.SherpaOnnxCreateOfflineTts.restype = ctypes.c_void_p
@@ -1336,10 +1337,17 @@ class Broker:
             engine.lock.release()
 
     def list_voices(self, management: bool = False):
-        fallback = self.config.get("default_voice", self.config.get("fallback_voice", ""))
+        # Favorites only affect catalog exposure. Read these lightweight fields
+        # from disk so toggling a star never has to tear down an active model.
+        live_config = load_config() if getattr(self, "exposure_hot_reload", False) else self.config
+        fallback = live_config.get("default_voice", live_config.get("fallback_voice", ""))
         records = sorted(self.voice_meta.values(), key=lambda record: record[0] != fallback)
+        favorites_only = bool(live_config.get("system_voices_favorites_only", False))
+        system_voices = set(live_config.get("favorite_voices", []))
+        if fallback:
+            system_voices.add(fallback)
         for voice_id, name, native, provider, model, capabilities, exposed in records:
-            if management or exposed:
+            if management or (exposed and (not favorites_only or voice_id in system_voices)):
                 yield voice_id, name, native, provider, model, ",".join(capabilities)
 
     def _supports(self, voice_id: str, language: str) -> bool:

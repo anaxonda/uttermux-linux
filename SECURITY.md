@@ -8,7 +8,8 @@ instead of opening a public issue.
 UtterMux treats online-provider credentials, cloned-voice recordings, and
 spoken text as sensitive. Diagnostics must not contain document text or secret
 values. Credentials are stored outside the main configuration with user-only
-permissions. The KOReader compatibility listener binds only to loopback.
+permissions. The Zotero bridge binds only to loopback, validates its Host
+header, and authenticates every request with a random mode-0600 runtime token.
 
 Model downloads must use HTTPS and an immutable SHA-256 digest. Custom model
 manifests describe data files only; they cannot run installation commands.

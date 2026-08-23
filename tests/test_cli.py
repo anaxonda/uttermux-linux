@@ -177,6 +177,7 @@ class CliTests(unittest.TestCase):
     def test_render_preserves_advanced_tuning(self):
         rendered = ut.render_config({
             "playback_speed": 1.25, "favorite_voices": ["edge/libby", "sherpa/alan"],
+            "system_voices_favorites_only": True,
             "local_threads": 2, "pocket_threads": 3, "local_silence_scale": .1,
             "pocket_num_steps": 5, "pocket_chunk_size": 8,
             "zipvoice_num_steps": 6, "moss_threads": 2, "moss_batch_frames": 4,
@@ -194,6 +195,7 @@ class CliTests(unittest.TestCase):
         document = __import__("tomllib").loads(rendered)
         self.assertEqual(document["playback_speed"], 1.25)
         self.assertEqual(document["favorite_voices"], ["edge/libby", "sherpa/alan"])
+        self.assertTrue(document["system_voices_favorites_only"])
 
     def test_favorite_command_persists_without_restarting_broker(self):
         with tempfile.TemporaryDirectory() as directory, \
@@ -202,6 +204,15 @@ class CliTests(unittest.TestCase):
             self.assertEqual(ut.read_config()["favorite_voices"], ["sherpa/alan"])
             ut.cmd_favorite(argparse.Namespace(action="remove", voice="sherpa/alan"))
             self.assertEqual(ut.read_config().get("favorite_voices", []), [])
+
+    def test_zotero_bridge_enable_is_explicit(self):
+        with mock.patch.object(ut.shutil, "which", return_value="/usr/bin/systemctl"), \
+             mock.patch.object(ut.subprocess, "run") as run:
+            ut.cmd_zotero(argparse.Namespace(action="enable"))
+        self.assertEqual(run.call_args_list[0].args[0],
+                         ["systemctl", "--user", "daemon-reload"])
+        self.assertEqual(run.call_args_list[1].args[0],
+                         ["systemctl", "--user", "enable", "--now", "uttermux-zotero.service"])
 
     def test_render_preserves_per_artifact_tuning(self):
         rendered = ut.render_config({"tuning": {"models": {

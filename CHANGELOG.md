@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added the authenticated bridge used by the separately released
+  `uttermux-zotero` companion, including bounded lookahead, local FIFO
+  synthesis, disconnect cancellation, reconnect retry, and cache policy.
+- Made favorites hot-reloadable so catalog changes do not interrupt active
+  synthesis, and added explicit `uttermux zotero enable|disable|status` service
+  management.
 - Audited cloud request contracts across Linux and Android: corrected Polly
   PCM/language handling, Azure resource paths, Cartesia authentication and
   pagination, Qwen realtime events, provider-native rate ranges, HTTPS proxy
