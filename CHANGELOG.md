@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.4.0-beta.7 - 2026-09-03
+## 0.4.0-beta.8 - 2026-09-03
 
 - Isolated sherpa-onnx and ONNX Runtime in an UtterMux-private runtime so
   distribution ABI upgrades cannot prevent the broker from starting.
