@@ -70,6 +70,8 @@ install(FILES assets/icons/io.uttermux.App-symbolic.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/symbolic/apps)
 install(FILES assets/icons/io.uttermux.Tray.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/status)
+install(FILES docs/THIRD_PARTY_RUNTIME.md
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/uttermux)
 
 if(BUILD_TESTING)
   add_executable(core_tests tests/core_tests.cpp)

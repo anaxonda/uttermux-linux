@@ -62,6 +62,26 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(self.u.automatic_model_cache(4 * 1024 ** 3), 1)
         self.assertEqual(self.u.automatic_model_cache(16 * 1024 ** 3), 2)
 
+    def test_private_sherpa_runtime_precedes_system_library(self):
+        script = Path("/opt/uttermux/uttermuxd")
+        with mock.patch.dict("os.environ", {}, clear=False):
+            candidates = self.u.sherpa_library_candidates(script)
+        self.assertEqual(candidates[0],
+                         "/opt/uttermux/runtime/lib/libsherpa-onnx-c-api.so")
+        self.assertEqual(candidates[-1], "libsherpa-onnx-c-api.so")
+
+    def test_sherpa_runtime_override_is_exclusive(self):
+        with mock.patch.dict("os.environ", {"UTTERMUX_SHERPA_LIBRARY": "/tmp/test-sherpa.so"}):
+            self.assertEqual(self.u.sherpa_library_candidates(), ["/tmp/test-sherpa.so"])
+
+    def test_missing_sherpa_runtime_returns_diagnostic(self):
+        with mock.patch.object(self.u.ctypes, "CDLL", side_effect=OSError("wrong ABI")):
+            api, selected, error = self.u.load_sherpa_api(Path("/opt/uttermux/uttermuxd"))
+        self.assertIsNone(api)
+        self.assertEqual(selected, "")
+        self.assertIn("wrong ABI", error)
+        self.assertIn("/opt/uttermux/runtime/lib", error)
+
     def test_kokoro_long_text_is_split_without_overlap_or_tm_symbol(self):
         text = (("First sentence is deliberately long enough to form a useful group. " * 4) +
                 "Second paragraph™ ends here. Final sentence remains present.")

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.4.0-beta.7 - 2026-09-03
+
+- Isolated sherpa-onnx and ONNX Runtime in an UtterMux-private runtime so
+  distribution ABI upgrades cannot prevent the broker from starting.
+- Kept online and eSpeak providers available when the optional local neural
+  runtime cannot load, with actionable runtime diagnostics.
+- Fixed automatic restart and authenticated health checks for the enabled
+  Zotero bridge.
+
 - Added the authenticated bridge used by the separately released
   `uttermux-zotero` companion, including bounded lookahead, local FIFO
   synthesis, disconnect cancellation, reconnect retry, and cache policy.

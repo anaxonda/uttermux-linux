@@ -6,7 +6,7 @@ pkgdesc='Universal local and online TTS broker for Speech Dispatcher'
 arch=(x86_64 aarch64)
 url='https://github.com/anaxonda/uttermux-linux'
 license=(GPL-3.0-or-later)
-depends=('speech-dispatcher>=0.12' libspeechd rubberband python python-gobject gtk4 python-numpy python-aiohttp python-certifi python-tabulate python-typing_extensions curl ffmpeg libpulse onnxruntime-cpu espeak-ng)
+depends=('speech-dispatcher>=0.12' libspeechd rubberband python python-gobject gtk4 python-numpy python-aiohttp python-certifi python-tabulate python-typing_extensions curl ffmpeg libpulse espeak-ng)
 optdepends=('wl-clipboard: read Wayland selections' 'xclip: read X11 selections' 'xsel: alternate X11 selection reader')
 makedepends=(cmake ninja gcc git)
 _release_version=0.4.0-beta.2
@@ -32,13 +32,13 @@ build() {
   local build_jobs=${UTTERMUX_BUILD_JOBS:-2}
   [[ $build_jobs =~ ^[1-9][0-9]*$ ]] || { error 'UTTERMUX_BUILD_JOBS must be a positive integer'; return 1; }
   cmake -S "sherpa-onnx-1.13.6" -B sherpa-build -G Ninja \
-    -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_SHARED_LIBS=ON \
+    -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr/lib/uttermux/runtime -DBUILD_SHARED_LIBS=ON \
     -DSHERPA_ONNX_ENABLE_TTS=ON -DSHERPA_ONNX_ENABLE_C_API=ON \
     -DSHERPA_ONNX_ENABLE_BINARY=OFF -DSHERPA_ONNX_ENABLE_PYTHON=OFF \
     -DSHERPA_ONNX_ENABLE_TESTS=OFF -DSHERPA_ONNX_ENABLE_CHECK=OFF \
     -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF \
     -DSHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION=OFF \
-    -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=ON
+    -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=OFF
   ninja -C sherpa-build -j "$build_jobs"
 
   cmake -S "uttermux-linux-$_release_version" -B build -G Ninja \
@@ -49,6 +49,12 @@ build() {
 package() {
   DESTDIR="$pkgdir" ninja -C sherpa-build install
   DESTDIR="$pkgdir" ninja -C build install
+  install -Dm644 sherpa-onnx-1.13.6/LICENSE \
+    "$pkgdir/usr/share/licenses/uttermux/sherpa-onnx-LICENSE"
+  install -Dm644 sherpa-build/_deps/onnxruntime-src/LICENSE \
+    "$pkgdir/usr/share/licenses/uttermux/onnxruntime-LICENSE"
+  install -Dm644 sherpa-build/_deps/onnxruntime-src/ThirdPartyNotices.txt \
+    "$pkgdir/usr/share/licenses/uttermux/onnxruntime-ThirdPartyNotices.txt"
   install -d "$pkgdir/usr/lib/uttermux/vendor"
   bsdtar -xf edge_tts-7.2.8-py3-none-any.whl -C "$pkgdir/usr/lib/uttermux/vendor"
   bsdtar -xf py3langid-0.3.0-py3-none-any.whl -C "$pkgdir/usr/lib/uttermux/vendor"

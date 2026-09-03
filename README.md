@@ -128,9 +128,10 @@ sudo ldconfig
 uttermux setup
 ```
 
-UtterMux requires sherpa-onnx 1.13.6 or newer with its TTS C API. Packaged and
-generic installers build the pinned runtime. Restart applications that cache
-system voice lists after first setup.
+Binary and generic installers include a pinned sherpa-onnx/ONNX Runtime pair in
+UtterMux's private library directory. Distribution ONNX Runtime upgrades do not
+alter that runtime. Restart applications that cache system voice lists after
+first setup.
 
 Verify the installation:
 
@@ -210,6 +211,10 @@ companion repository:
 uttermux zotero enable
 uttermux zotero status
 ```
+
+Enabling is persistent: the user service starts at login and is restarted by
+UtterMux upgrades. `status` verifies the service, broker, authenticated HTTP
+endpoint, and bridge protocol rather than reporting only the systemd state.
 
 The bridge binds to `127.0.0.1`, authenticates requests with a mode-0600 runtime
 token, cancels disconnected synthesis, and never logs text or credentials.

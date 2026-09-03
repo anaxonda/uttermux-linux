@@ -21,7 +21,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: >-
           pacman -Syu --noconfirm --needed cmake ninja gcc pkgconf python
-          speech-dispatcher rubberband onnxruntime-cpu ffmpeg github-cli
+          speech-dispatcher rubberband ffmpeg github-cli
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
@@ -63,7 +63,7 @@ jobs:
         run: >-
           pacman -Syu --noconfirm --needed git sudo speech-dispatcher libspeechd
           rubberband python python-gobject gtk4 python-numpy python-aiohttp
-          python-certifi python-tabulate python-typing_extensions curl ffmpeg libpulse onnxruntime-cpu espeak-ng cmake
+          python-certifi python-tabulate python-typing_extensions curl ffmpeg libpulse espeak-ng cmake
           ninja gcc pkgconf github-cli
       - name: Download release PKGBUILD
         env:

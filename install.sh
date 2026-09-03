@@ -33,6 +33,9 @@ install_arch_package() {
 refresh_user_services() {
   systemctl --user daemon-reload
   systemctl --user restart uttermux.service uttermux-tray.service
+  if systemctl --user is-enabled --quiet uttermux-zotero.service; then
+    systemctl --user restart uttermux-zotero.service
+  fi
 }
 
 if [[ ${EUID:-$(id -u)} -eq 0 ]]; then

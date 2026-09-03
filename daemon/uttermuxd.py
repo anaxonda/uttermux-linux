@@ -70,6 +70,29 @@ GROK_LANGUAGES = (
 LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
 
+def sherpa_library_candidates(script: Path | None = None) -> list[str]:
+    """Prefer UtterMux's private runtime while retaining a development fallback."""
+    override = os.environ.get("UTTERMUX_SHERPA_LIBRARY", "").strip()
+    if override:
+        return [override]
+    root = (script or Path(__file__)).resolve().parent
+    return [
+        str(root / "runtime/lib/libsherpa-onnx-c-api.so"),
+        str(root / "runtime/libsherpa-onnx-c-api.so"),
+        "libsherpa-onnx-c-api.so",
+    ]
+
+
+def load_sherpa_api(script: Path | None = None):
+    failures = []
+    for candidate in sherpa_library_candidates(script):
+        try:
+            return ctypes.CDLL(candidate), candidate, ""
+        except OSError as error:
+            failures.append(f"{candidate}: {error}")
+    return None, "", "; ".join(failures)
+
+
 def automatic_threads(engine: str, logical_cores: int | None = None) -> int:
     """Return a conservative portable default; explicit config overrides it."""
     cores = max(1, int(logical_cores or os.cpu_count() or 1))
@@ -1158,16 +1181,19 @@ class Broker:
     def __init__(self):
         self.config = load_config()
         self.exposure_hot_reload = True
-        self.api = ctypes.CDLL("libsherpa-onnx-c-api.so")
-        self.api.SherpaOnnxCreateOfflineTts.argtypes = [ctypes.POINTER(TtsConfig)]
-        self.api.SherpaOnnxCreateOfflineTts.restype = ctypes.c_void_p
-        self.api.SherpaOnnxDestroyOfflineTts.argtypes = [ctypes.c_void_p]
-        self.api.SherpaOnnxOfflineTtsSampleRate.argtypes = [ctypes.c_void_p]
-        self.api.SherpaOnnxOfflineTtsSampleRate.restype = ctypes.c_int32
-        self.api.SherpaOnnxOfflineTtsGenerateWithConfig.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(GenerationConfig), PROGRESS, ctypes.c_void_p]
-        self.api.SherpaOnnxOfflineTtsGenerateWithConfig.restype = ctypes.POINTER(GeneratedAudio)
-        self.api.SherpaOnnxDestroyOfflineTtsGeneratedAudio.argtypes = [ctypes.POINTER(GeneratedAudio)]
         self.models, self.voices, self.voice_meta = self._load_models(), {}, {}
+        self.api, self.sherpa_library, self.sherpa_error = load_sherpa_api()
+        if self.api:
+            self.api.SherpaOnnxCreateOfflineTts.argtypes = [ctypes.POINTER(TtsConfig)]
+            self.api.SherpaOnnxCreateOfflineTts.restype = ctypes.c_void_p
+            self.api.SherpaOnnxDestroyOfflineTts.argtypes = [ctypes.c_void_p]
+            self.api.SherpaOnnxOfflineTtsSampleRate.argtypes = [ctypes.c_void_p]
+            self.api.SherpaOnnxOfflineTtsSampleRate.restype = ctypes.c_int32
+            self.api.SherpaOnnxOfflineTtsGenerateWithConfig.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(GenerationConfig), PROGRESS, ctypes.c_void_p]
+            self.api.SherpaOnnxOfflineTtsGenerateWithConfig.restype = ctypes.POINTER(GeneratedAudio)
+            self.api.SherpaOnnxDestroyOfflineTtsGeneratedAudio.argtypes = [ctypes.POINTER(GeneratedAudio)]
+        else:
+            print(f"uttermuxd: local neural runtime unavailable: {self.sherpa_error}", file=sys.stderr)
         self.engines: OrderedDict[str, SherpaEngine] = OrderedDict()
         self.engine_lock = threading.Lock()
         configured_cache = int(self.config.get("max_loaded_models", 0))
@@ -1180,7 +1206,7 @@ class Broker:
         self.runtime_lock = threading.Lock()
         self.runtime = {"status": "idle", "activeVoice": "", "routedVoice": "",
                         "language": "", "fallbackReason": ""}
-        for model in self.models.values():
+        for model in (self.models.values() if self.api else ()):
             for voice in model.get("voice", []):
                 voice_id = f"sherpa/{model['id']}/{voice['id']}"
                 self.voices[voice_id] = (model, voice)
@@ -1266,6 +1292,8 @@ class Broker:
         return models
 
     def engine(self, model: dict, thread_override: int = 0) -> SherpaEngine:
+        if not self.api:
+            raise RuntimeError(f"local neural runtime unavailable: {self.sherpa_error}")
         model_id = model["id"] + (f"@threads-{thread_override}" if thread_override else "")
         with self.engine_lock:
             if model_id in self.engines:
@@ -1528,6 +1556,10 @@ class Broker:
         except (OSError, StopIteration, ValueError, IndexError):
             result["rssMb"] = 0
         result["pid"] = os.getpid()
+        result["sherpaAvailable"] = bool(self.api)
+        result["sherpaLibrary"] = self.sherpa_library
+        if self.sherpa_error:
+            result["sherpaError"] = self.sherpa_error
         return result
 
 
