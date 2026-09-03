@@ -21,7 +21,7 @@ printf '%s  %s\n' 78f5d10f957d2de1867a1e08395e9ec2ec388911c853dd141887396667f3ff
 tar -xzf "$work/sherpa.tar.gz" -C "$work"
 sed -i '/^[[:space:]]*-Wno-format$/d' "$work/sherpa-onnx-$sherpa_version/cmake/espeak-ng-for-piper.cmake"
 cmake -S "$work/sherpa-onnx-$sherpa_version" -B "$work/sherpa-build" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_SHARED_LIBS=ON \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/lib/uttermux/runtime -DBUILD_SHARED_LIBS=ON \
   -DSHERPA_ONNX_ENABLE_TTS=ON -DSHERPA_ONNX_ENABLE_C_API=ON \
   -DSHERPA_ONNX_ENABLE_BINARY=OFF -DSHERPA_ONNX_ENABLE_PYTHON=OFF \
   -DSHERPA_ONNX_ENABLE_TESTS=OFF -DSHERPA_ONNX_ENABLE_CHECK=OFF \
@@ -30,6 +30,12 @@ cmake -S "$work/sherpa-onnx-$sherpa_version" -B "$work/sherpa-build" -G Ninja \
   -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=OFF
 cmake --build "$work/sherpa-build" --parallel "$jobs"
 DESTDIR="$stage" cmake --install "$work/sherpa-build"
+install -Dm644 "$work/sherpa-onnx-$sherpa_version/LICENSE" \
+  "$stage/usr/share/doc/uttermux/sherpa-onnx-LICENSE"
+install -Dm644 "$work/sherpa-build/_deps/onnxruntime-src/LICENSE" \
+  "$stage/usr/share/doc/uttermux/onnxruntime-LICENSE"
+install -Dm644 "$work/sherpa-build/_deps/onnxruntime-src/ThirdPartyNotices.txt" \
+  "$stage/usr/share/doc/uttermux/onnxruntime-ThirdPartyNotices.txt"
 
 cmake -S "$root" -B "$work/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/usr -DSPEECHD_MODULE_DIR=/usr/lib/speech-dispatcher-modules \

@@ -55,7 +55,7 @@ sed -i '/^[[:space:]]*-Wno-format$/d' \
 ! grep -Eq '^[[:space:]]*-Wno-format$' \
   "$work/sherpa-onnx-$sherpa_version/cmake/espeak-ng-for-piper.cmake"
 cmake -S "$work/sherpa-onnx-$sherpa_version" -B "$work/sherpa-build" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" -DBUILD_SHARED_LIBS=ON \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix/lib/uttermux/runtime" -DBUILD_SHARED_LIBS=ON \
   -DSHERPA_ONNX_ENABLE_TTS=ON -DSHERPA_ONNX_ENABLE_C_API=ON \
   -DSHERPA_ONNX_ENABLE_BINARY=OFF -DSHERPA_ONNX_ENABLE_PYTHON=OFF \
   -DSHERPA_ONNX_ENABLE_TESTS=OFF -DSHERPA_ONNX_ENABLE_CHECK=OFF \
@@ -74,6 +74,12 @@ cmake --build "$work/build" --parallel "$build_jobs"
 ctest --test-dir "$work/build" --output-on-failure
 sudo cmake --install "$work/sherpa-build"
 sudo cmake --install "$work/build"
+sudo install -Dm644 "$work/sherpa-onnx-$sherpa_version/LICENSE" \
+  "$prefix/share/licenses/uttermux/sherpa-onnx-LICENSE"
+sudo install -Dm644 "$work/sherpa-build/_deps/onnxruntime-src/LICENSE" \
+  "$prefix/share/licenses/uttermux/onnxruntime-LICENSE"
+sudo install -Dm644 "$work/sherpa-build/_deps/onnxruntime-src/ThirdPartyNotices.txt" \
+  "$prefix/share/licenses/uttermux/onnxruntime-ThirdPartyNotices.txt"
 sudo ldconfig
 
 # Keep the two pure-Python runtime dependencies private to UtterMux.
@@ -86,5 +92,8 @@ sudo cp -a "$work/vendor/." "$vendor/"
 uttermux setup
 systemctl --user daemon-reload
 systemctl --user restart uttermux.service uttermux-tray.service
+if systemctl --user is-enabled --quiet uttermux-zotero.service; then
+  systemctl --user restart uttermux-zotero.service
+fi
 uttermux doctor
 printf '%s\n' 'UtterMux is installed. Restart applications that cache system voice lists.'

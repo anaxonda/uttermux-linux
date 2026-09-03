@@ -72,6 +72,16 @@ def main() -> int:
         errors.append("Debian installer does not prefer the published binary package")
     if "/usr/lib/speech-dispatcher-modules" not in (ROOT / "packaging/debian/build-deb").read_text():
         errors.append("Debian package does not use the distribution module loader path")
+    for name, text in (("Arch", template),
+                       ("Debian", (ROOT / "packaging/debian/build-deb").read_text()),
+                       ("source", (ROOT / "scripts/install-source").read_text())):
+        if "uttermux/runtime" not in text:
+            errors.append(f"{name} build does not install the private neural runtime")
+    if "onnxruntime-cpu" in template:
+        errors.append("Arch runtime must not depend on the distribution ONNX Runtime ABI")
+    zotero_unit = (ROOT / "systemd/uttermux-zotero.service").read_text()
+    if "ReadWritePaths=%t" not in zotero_unit:
+        errors.append("Zotero bridge cannot write its runtime authentication token")
     espeak_workaround = "'/^[[:space:]]*-Wno-format$/d'"
     if espeak_workaround not in template or espeak_workaround not in (ROOT / "scripts/install-source").read_text():
         errors.append("installers lack the GCC 16 bundled-eSpeak format-security workaround")
