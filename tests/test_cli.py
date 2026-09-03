@@ -214,6 +214,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[1].args[0],
                          ["systemctl", "--user", "enable", "--now", "uttermux-zotero.service"])
 
+    def test_zotero_status_checks_broker_and_authenticated_bridge(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": directory}), \
+             mock.patch.object(ut.shutil, "which", return_value="/usr/bin/systemctl"), \
+             mock.patch.object(ut.subprocess, "run", return_value=mock.Mock(
+                 returncode=0, stdout="active\n")), \
+             mock.patch.object(ut, "transact", return_value=iter([(ut.DONE, b"")])), \
+             mock.patch.object(ut.urllib.request, "urlopen", return_value=response), \
+             mock.patch.object(ut.json, "load", return_value={"schemaVersion": 1}), \
+             mock.patch("builtins.print") as output:
+            Path(directory, "uttermux-zotero.token").write_text("secret")
+            ut.cmd_zotero(argparse.Namespace(action="status"))
+        output.assert_called_with("active (broker and bridge schema 1 healthy)")
+
     def test_render_preserves_per_artifact_tuning(self):
         rendered = ut.render_config({"tuning": {"models": {
             "kokoro-multi-lang-v1_1": {"threads": 6}}}})

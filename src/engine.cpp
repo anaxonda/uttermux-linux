@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 
 #include <cstring>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <stdexcept>
@@ -42,6 +43,8 @@ class Api {
   using DestroyAudio = void (*)(const GeneratedAudio *);
 
   Api() {
+    const char *override = std::getenv("UTTERMUX_SHERPA_LIBRARY");
+    if (override && *override) handle_ = dlopen(override, RTLD_NOW | RTLD_LOCAL);
     const char *names[] = {"libsherpa-onnx-c-api.so", "libsherpa-onnx-c-api.so.1", nullptr};
     for (int i = 0; names[i] && !handle_; ++i) handle_ = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
     if (!handle_) throw std::runtime_error(std::string("cannot load libsherpa-onnx-c-api.so: ") + dlerror());

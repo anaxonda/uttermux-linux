@@ -681,9 +681,25 @@ def cmd_zotero(args):
         result = subprocess.run(["systemctl", "--user", "is-active", unit],
                                 text=True, capture_output=True)
         state = result.stdout.strip() or "inactive"
-        print(state)
         if result.returncode:
-            raise RuntimeError(f"Zotero bridge is {state}")
+            raise RuntimeError(f"Zotero bridge unit is {state}")
+        try:
+            next(iter(transact(HEALTH)), None)
+        except Exception as error:
+            raise RuntimeError(f"Zotero bridge is active but broker is unavailable: {error}") from None
+        runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+        token_file = runtime / "uttermux-zotero.token"
+        try:
+            authorization = token_file.read_text(encoding="utf-8").strip()
+            request = urllib.request.Request("http://127.0.0.1:8766/health",
+                headers={"Authorization": f"Bearer {authorization}"})
+            with urllib.request.urlopen(request, timeout=2) as response:
+                health = json.load(response)
+            if health.get("schemaVersion") != 1:
+                raise RuntimeError(f"unsupported bridge schema {health.get('schemaVersion')}")
+        except (OSError, ValueError, urllib.error.URLError, RuntimeError) as error:
+            raise RuntimeError(f"Zotero bridge unit is active but health check failed: {error}") from None
+        print("active (broker and bridge schema 1 healthy)")
 
 
 def cmd_routes(_args):
@@ -1369,10 +1385,22 @@ def cmd_stop(_args):
 def doctor(_args):
     checks = {"sd_uttermux": any(p.exists() for p in [Path("/usr/lib/speech-dispatcher/speech-dispatcher-modules/sd_uttermux"), Path("/usr/local/lib/speech-dispatcher/speech-dispatcher-modules/sd_uttermux")]),
               "uttermux socket": socket_path().exists(), "spd-say": bool(shutil.which("spd-say")),
-              "ffmpeg": bool(shutil.which("ffmpeg")), "local models": (config_dir() / "models.d").is_dir()}
+              "ffmpeg": bool(shutil.which("ffmpeg"))}
     for name, okay in checks.items(): print(f"{'OK' if okay else 'FAIL'}  {name}")
+    model_dirs = (config_dir() / "models.d",
+                  config_dir().parent / "speech-dispatcher-sherpa/models.d")
+    local_manifests = sum(len(tuple(path.glob("*.toml"))) for path in model_dirs if path.is_dir())
+    print(f"INFO  local models: {local_manifests} installed")
     try:
         next(iter(transact(HEALTH)), None); print("OK  broker protocol")
+        runtime = next((json.loads(payload) for kind, payload in transact(STATUS)
+                        if kind == STATE), {})
+        sherpa_ok = bool(runtime.get("sherpaAvailable"))
+        has_local = local_manifests > 0
+        label = "OK" if sherpa_ok else ("FAIL" if has_local else "WARN")
+        detail = runtime.get("sherpaLibrary") or runtime.get("sherpaError", "unavailable")
+        print(f"{label}  local neural runtime: {detail}")
+        if has_local and not sherpa_ok: checks["sherpa runtime"] = False
     except Exception as error: print(f"FAIL  broker protocol: {error}"); checks["broker"] = False
     if shutil.which("pactl"):
         output = subprocess.run(["pactl", "get-default-sink"], text=True,
@@ -1400,7 +1428,8 @@ def diagnostic_report() -> dict:
     services = {}
     if shutil.which("systemctl"):
         for service in ("uttermux.socket", "uttermux.service", "speech-dispatcher.service",
-                        "uttermux-tray.service", "uttermux-koreader.service"):
+                        "uttermux-tray.service", "uttermux-koreader.service",
+                        "uttermux-zotero.service"):
             result = subprocess.run(["systemctl", "--user", "is-active", service],
                                     text=True, capture_output=True, check=False)
             services[service] = result.stdout.strip() or "inactive"
