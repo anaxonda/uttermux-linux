@@ -12,6 +12,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=%t
 
 [Install]
 WantedBy=default.target
