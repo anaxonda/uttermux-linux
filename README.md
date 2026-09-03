@@ -214,8 +214,9 @@ uttermux zotero status
 The bridge binds to `127.0.0.1`, authenticates requests with a mode-0600 runtime
 token, cancels disconnected synthesis, and never logs text or credentials.
 Local audio may use Zotero's private Read Aloud cache; online audio is marked
-`no-store`. The add-on patches a private Zotero 9 API and is released separately
-so compatibility can follow Zotero's release cycle.
+`no-store`. The add-on supports Zotero 9.0.x and 10.0.x through a private Read
+Aloud API and is released separately so compatibility can follow Zotero's
+release cycle.
 
 ### Voice profiles
 
