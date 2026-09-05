@@ -222,13 +222,24 @@ class CliTests(unittest.TestCase):
              mock.patch.object(ut.shutil, "which", return_value="/usr/bin/systemctl"), \
              mock.patch.object(ut.subprocess, "run", return_value=mock.Mock(
                  returncode=0, stdout="active\n")), \
-             mock.patch.object(ut, "transact", return_value=iter([(ut.DONE, b"")])), \
+             mock.patch.object(ut, "transact", side_effect=[iter([(ut.DONE, b"")]),
+                 iter([(ut.STATE, json.dumps({"sherpaAvailable": True}).encode())])]), \
              mock.patch.object(ut.urllib.request, "urlopen", return_value=response), \
              mock.patch.object(ut.json, "load", return_value={"schemaVersion": 1}), \
              mock.patch("builtins.print") as output:
             Path(directory, "uttermux-zotero.token").write_text("secret")
             ut.cmd_zotero(argparse.Namespace(action="status"))
         output.assert_called_with("active (broker and bridge schema 1 healthy)")
+
+    def test_zotero_status_reports_local_runtime_loader_failure(self):
+        with mock.patch.object(ut.shutil, "which", return_value="/usr/bin/systemctl"), \
+             mock.patch.object(ut.subprocess, "run", return_value=mock.Mock(
+                 returncode=0, stdout="active\n")), \
+             mock.patch.object(ut, "transact", side_effect=[iter([(ut.DONE, b"")]),
+                 iter([(ut.STATE, json.dumps({"sherpaAvailable": False,
+                     "sherpaError": "wrong ONNX ABI"}).encode())])]):
+            with self.assertRaisesRegex(RuntimeError, "wrong ONNX ABI"):
+                ut.cmd_zotero(argparse.Namespace(action="status"))
 
     def test_render_preserves_per_artifact_tuning(self):
         rendered = ut.render_config({"tuning": {"models": {

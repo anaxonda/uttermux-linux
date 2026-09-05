@@ -27,7 +27,9 @@ install_arch_package() {
     printf 'Adopting %d files from an earlier source installation…\n' \
       "$(( ${#overwrite_args[@]} / 2 ))"
   fi
-  sudo pacman -U --needed --noconfirm "${overwrite_args[@]}" "$archive"
+  # Do not use --needed here. Reinstalling the selected release repairs files
+  # changed by an older source install or an interrupted/same-version upgrade.
+  sudo pacman -U --noconfirm "${overwrite_args[@]}" "$archive"
 }
 
 refresh_user_services() {
@@ -117,7 +119,9 @@ fi
 
 (
   cd "$work"
-  makepkg --syncdeps --install --needed --noconfirm
+  # Reinstall the resolved release even when its version is already present so
+  # package-owned services and private runtime files cannot remain stale.
+  makepkg --syncdeps --install --noconfirm
 )
 
 uttermux setup

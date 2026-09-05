@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.0-beta.9 - 2026-09-05
+
+- Made Arch upgrades reinstall the selected UtterMux package so same-version
+  file drift and interrupted upgrades are repaired instead of silently kept.
+- Extended Zotero bridge diagnostics to report local neural-runtime loader
+  failures, including incompatible ONNX Runtime ABIs.
+
 ## 0.4.0-beta.8 - 2026-09-03
 
 - Isolated sherpa-onnx and ONNX Runtime in an UtterMux-private runtime so

@@ -685,8 +685,14 @@ def cmd_zotero(args):
             raise RuntimeError(f"Zotero bridge unit is {state}")
         try:
             next(iter(transact(HEALTH)), None)
+            runtime = next((json.loads(payload) for kind, payload in transact(STATUS)
+                            if kind == STATE), {})
         except Exception as error:
             raise RuntimeError(f"Zotero bridge is active but broker is unavailable: {error}") from None
+        if runtime.get("sherpaAvailable") is False:
+            detail = runtime.get("sherpaError") or "private neural runtime did not load"
+            raise RuntimeError(
+                f"Zotero bridge is active but local synthesis is unavailable: {detail}")
         runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
         token_file = runtime / "uttermux-zotero.token"
         try:

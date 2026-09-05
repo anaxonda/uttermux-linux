@@ -28,6 +28,11 @@ class PackagingTests(unittest.TestCase):
             self.assertIn("is-enabled --quiet uttermux-zotero.service", text)
             self.assertIn("restart uttermux-zotero.service", text)
 
+    def test_arch_installer_repairs_same_version_package_drift(self):
+        installer = (ROOT / "install.sh").read_text()
+        self.assertNotIn("pacman -U --needed", installer)
+        self.assertNotIn("makepkg --syncdeps --install --needed", installer)
+
 
 if __name__ == "__main__":
     unittest.main()
