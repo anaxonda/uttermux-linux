@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.4.0-beta.10 - 2026-09-05
+
+- Fixed Arch release artifact selection so split debug-symbol packages cannot
+  be published under the installable package filename.
+
 ## 0.4.0-beta.9 - 2026-09-05
 
 - Made Arch upgrades reinstall the selected UtterMux package so same-version

@@ -62,6 +62,8 @@ def main() -> int:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
     if "packaging/arch/PKGBUILD.in" not in workflow:
         errors.append("release workflow does not render the Arch package template")
+    if "uttermux-[0-9]*-x86_64.pkg.tar.zst" not in workflow:
+        errors.append("release workflow may select the split Arch debug package")
     for artifact in ("arch-package", "debian-package", "packaging/debian/build-deb"):
         if artifact not in workflow: errors.append(f"release workflow is missing {artifact}")
     install_script = installer.read_text()

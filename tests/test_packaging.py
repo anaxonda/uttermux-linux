@@ -33,6 +33,11 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("pacman -U --needed", installer)
         self.assertNotIn("makepkg --syncdeps --install --needed", installer)
 
+    def test_release_selects_installable_arch_package_not_debug_symbols(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("uttermux-[0-9]*-x86_64.pkg.tar.zst", workflow)
+        self.assertNotIn("-name 'uttermux-*.pkg.tar.zst'", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

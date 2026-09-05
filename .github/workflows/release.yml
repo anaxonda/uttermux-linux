@@ -74,8 +74,10 @@ jobs:
           useradd --create-home builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
           su builder -c "cd '$GITHUB_WORKSPACE' && UTTERMUX_BUILD_JOBS=2 makepkg --cleanbuild --noconfirm --nodeps"
-          package=$(find . -maxdepth 1 -name 'uttermux-*.pkg.tar.zst' -print -quit)
-          test -n "$package"
+          mapfile -t packages < <(find . -maxdepth 1 \
+            -name 'uttermux-[0-9]*-x86_64.pkg.tar.zst' -print)
+          test "${#packages[@]}" -eq 1
+          package=${packages[0]}
           mv "$package" "uttermux-${GITHUB_REF_NAME#v}-arch-x86_64.pkg.tar.zst"
           sha256sum "uttermux-${GITHUB_REF_NAME#v}-arch-x86_64.pkg.tar.zst" > "uttermux-${GITHUB_REF_NAME#v}-arch-x86_64.pkg.tar.zst.sha256"
       - name: Upload Arch package
