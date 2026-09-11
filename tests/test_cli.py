@@ -174,6 +174,12 @@ class CliTests(unittest.TestCase):
         self.assertIn('[routing.voices]', rendered)
         self.assertIn('"fr" = ["elevenlabs/bill", "edge/denise"]', rendered)
 
+    def test_render_preserves_grok_transport(self):
+        rendered = ut.render_config({"providers": {"grok": {"enabled": True,
+                                                               "transport": "rest"}}})
+        document = __import__("tomllib").loads(rendered)
+        self.assertEqual(document["providers"]["grok"]["transport"], "rest")
+
     def test_render_preserves_advanced_tuning(self):
         rendered = ut.render_config({
             "playback_speed": 1.25, "favorite_voices": ["edge/libby", "sherpa/alan"],

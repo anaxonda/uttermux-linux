@@ -220,7 +220,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def reply(self, value, content_type="text/plain"):
         body = value.encode() if isinstance(value, str) else json.dumps(value).encode()
-        self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+        self.send_response(200); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(body))); self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def do_GET(self):
         if self.path != "/voices": self.send_error(404); return

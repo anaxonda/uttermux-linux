@@ -226,7 +226,8 @@ def render_config(doc: dict) -> str:
     grok = providers.get("grok", {})
     lines += ["", "[providers.grok]", f'enabled = {str(bool(grok.get("enabled", False))).lower()}',
               f'credential_file = {quote(grok.get("credential_file", config_dir() / "credentials/grok-key"))}',
-              f'automatic_language = {str(bool(grok.get("automatic_language", True))).lower()}']
+              f'automatic_language = {str(bool(grok.get("automatic_language", True))).lower()}',
+              f'transport = {quote(grok.get("transport", "websocket"))}']
     if grok.get("default_voice"):
         lines.append(f'default_voice = {quote(grok["default_voice"])}')
     for provider_id in CLOUD_PROVIDER_FIELDS:

@@ -416,5 +416,13 @@ class ProtocolTests(unittest.TestCase):
         handler.do_POST()
         audio.stop.assert_called_once_with(reset=True)
 
+    def test_koreader_reply_tolerates_disconnected_client(self):
+        bridge = load_bridge(); handler = object.__new__(bridge.Handler)
+        handler.send_response = mock.Mock(); handler.send_header = mock.Mock()
+        handler.end_headers = mock.Mock()
+        handler.wfile = mock.Mock()
+        handler.wfile.write.side_effect = BrokenPipeError
+        handler.reply("ready")
+
 
 if __name__ == "__main__": unittest.main()

@@ -102,7 +102,8 @@ class Tray:
             if event == "clicked": self.activate(item)
             invocation.return_value(None)
         elif method == "EventGroup":
-            for item, event, _data, _timestamp in params.unpack():
+            events, = params.unpack()
+            for item, event, _data, _timestamp in events:
                 if event == "clicked": self.activate(item)
             invocation.return_value(GLib.Variant("(ai)", ([],)))
         elif method == "AboutToShow": invocation.return_value(GLib.Variant("(b)", (False,)))
